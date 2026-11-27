@@ -8,7 +8,7 @@ A Windows x64 desktop assistant with an interactive crimson particle core, local
 2. Open the extracted **ELISSION** folder and launch **ELISSION.exe** there. Keep the sibling runtime files and `resources` directory alongside it. The executable is unsigned.
 3. ELISSION starts in the Windows notification area. Choose **Open ELISSION** from its tray menu to type a command or **Settings** to configure it. Try `calculate (12 + 4) * 3` in the prompt. This works without an AI provider.
 4. To use voice, enable Windows microphone access for desktop apps and install a desktop/SAPI recognition language pack with dictation support. Check **Settings → Voice** for available desktop voices. Some modern Windows narrator voices are unavailable to desktop SAPI.
-5. Hold **I** and say **“Eli”**. Give the recognizer a moment to open the microphone before speaking. After the core activates, speak the request. Release **I** once the gesture completes. **Ctrl + Space** opens dictation from the background and hides the visible overlay. The microphone button starts dictation when the overlay is open. Both global activation methods can be changed or disabled in Settings. The hold key continues to reach the focused application.
+5. Hold **I** and say **“Eli”**. Give the recognizer a moment to open the microphone before speaking. After the core activates, speak the request. Release **I** once the gesture completes. **Ctrl + Alt + Space** toggles the overlay without starting the microphone. The microphone button starts dictation when the overlay is open. Both global activation methods can be changed or disabled in Settings. The hold key continues to reach the focused application.
 6. Stop with **Esc**, **Stop**, or the fallback activation shortcut. For spoken interruption, enable **“Eli, stop” during playback** in Settings. The audio device remains open while this option actively listens. Headphones reduce speaker feedback.
 
 Use the title bar to drag the window, drag an edge to resize, or use the compact and fullscreen controls. Escape or the window’s X hides the overlay. Select **Exit** from the tray to shut down ELISSION.
@@ -65,3 +65,5 @@ The output is `release/ELISSION-Windows-x64.zip`. A Linux or Windows machine can
 - `windows/` contains the compiled x64 helper's source for Win32, SAPI, WMI, and Core Audio.
 
 For the separate Linux Electron smoke test, run `npm run test:desktop` with an X11 display or Xvfb available. Set `ELISSION_ELECTRON` to use an independently downloaded Electron 45.5.0 Linux executable.
+
+For ELISSION 2.0 setup, browser pairing, ASUS M5 mapping and architecture, see [the preview guide](docs/ELISSION-2.md). See [the test report](docs/TESTING.md) for hardware-specific checks.

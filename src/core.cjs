@@ -1,6 +1,10 @@
-const personality = 'You are ELISSION, a composed, articulate desktop companion. Be precise and candid. Use dry wit sparingly and never in serious or sensitive situations. Avoid stock assistant phrases and imitation of actors. Admit uncertainty. You cannot perform actions through this chat response. Never claim an action happened unless evidence says it did.';
+const personality = 'You are ELISSION, a composed, articulate desktop companion. Be precise and candid. Use dry wit sparingly and never in serious or sensitive situations. Avoid stock assistant phrases and imitation of actors. Admit uncertainty. When writing a conversational reply, report only actions confirmed by the application. Never claim an action happened unless evidence says it did.';
 const isWake = text => /^\s*(?:eli|ellie|elley)\s*[.!?]*\s*$/i.test(text);
 const stripWake = text => text.replace(/^\s*(?:eli|ellie)\s*[,.:]\s*/i, '').trim();
+function containsCredential(text) {
+  return /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:gh[pousr]_|github_pat_|sk-(?:proj-|live-|test-)?|AKIA)[A-Za-z0-9_-]{16,}|\b(?:password|passphrase|api[ _-]?key|secret[ _-]?key|access[ _-]?token|card number|cvv|cvc)\s*(?:is\b|[=:]))/i.test(text)
+    || /(?:^|\D)(?:\d[ -]?){13,19}(?:\D|$)/.test(text);
+}
 function calculate(input) {
   const parts = input.match(/\d+(?:\.\d+)?|[()+*/%-]/g) || [];
   if (input.length > 200 || parts.join('') !== input.replace(/\s/g, '')) throw Error('Use numbers, parentheses, and arithmetic operators.');
@@ -42,8 +46,16 @@ function parse(text) {
   const documentCommand = text.match(/^(open)(?: a| the)? (?:file|folder)$/i);
   if (documentCommand) return {action:'pick',value:/folder$/i.test(text) ? 'folder' : 'file'};
   for (const [regex, action] of [
+    [/^(summarize|inspect) (?:the )?(?:active|current) (?:browser )?tab[.!]?$/i,'browser_tab'],
+    [/^(?:read|extract) (?:the )?(table|tables) (?:from|in|on) (?:the )?(?:active|current) (?:browser )?tab[.!]?$/i,'browser_table'],
+    [/^draft in textarea ([^:]+)\s*:\s*(.+)$/is,'browser_draft'],
+    [/^generate java class ([A-Za-z][A-Za-z0-9_]{0,79})\s*:\s*(.+)$/is,'java_draft'],
+    [/^inspect window (.+)$/i,'inspect_window'],
+    [/^(inspect) (?:a |the )?project(?: folder)?[.!]?$/i,'project'],
+    [/^(?:plan and run|run task)\s+(.+)$/is,'task'],
     [/^(?:open|launch)\s+(.+)$/i,'open'], [/^close\s+(.+)$/i,'close'], [/^switch to\s+(.+)$/i,'switch'],
-    [/^(?:find|search installed apps(?: for)?)\s+(.+)$/i,'apps'], [/^(?:search(?: the web)? for|google)\s+(.+)$/i,'web'],
+    [/^find (documentation for .+)$/i,'web'],
+    [/^(?:find|search installed apps(?: for)?)\s+(.+)$/i,'apps'], [/^(?:search(?: the web| Google)? for|google)\s+(.+)$/i,'web'],
     [/^(?:set )?volume(?: to)? (\d+)%?$/i,'volume'], [/^(?:set )?brightness(?: to)? (\d+)%?$/i,'brightness'],
     [/^(mute|unmute)(?: audio)?$/i,'mute'], [/^(play|pause|next track|previous track)$/i,'media'],
     [/^(?:take (?:a )?)?(screenshot)$/i,'screenshot'],
@@ -55,7 +67,7 @@ function parse(text) {
     [/^(move)(?: a| this| the)? file$/i,'move']
   ]) {
     const match = text.match(regex);
-    if (match) return { action, value: match[1] };
+    if (match) return { action, value: action === 'browser_draft' ? {label:match[1].trim(),text:match[2].trim()} : action === 'java_draft' ? {name:match[1],instruction:match[2].trim()} : match[1] };
   }
 }
 async function providerRequest(endpoint, key, signal, options) {
@@ -99,20 +111,63 @@ async function verifyModel({provider,endpoint,model,key,signal}) {
     onPart:() => {}
   });
 }
+const ollamaDefaults = {
+  endpoint:'http://localhost:11434/v1/chat/completions',
+  model:'qwen3.5:4b'
+};
+async function detectOllama(signal = AbortSignal.timeout(3500)) {
+  const response = await providerRequest('http://localhost:11434/api/tags','',signal,{method:'GET'});
+  const data = await response.json();
+  if (!Array.isArray(data.models)) throw Error('Ollama did not return a model list.');
+  return data.models.map(entry => entry.model || entry.name).filter(name => typeof name === 'string');
+}
+function replyText() {
+  let pending = '', hidden = false;
+  return (chunk, done = false) => {
+    pending += chunk;
+    let output = '';
+    while (pending) {
+      const marker = hidden ? '</think>' : '<think>';
+      const index = pending.toLowerCase().indexOf(marker);
+      if (index >= 0) {
+        if (!hidden) output += pending.slice(0,index);
+        pending = pending.slice(index + marker.length);
+        hidden = !hidden;
+        continue;
+      }
+      let keep = done ? 0 : Math.min(marker.length - 1,pending.length);
+      while (keep && !marker.startsWith(pending.slice(-keep).toLowerCase())) keep--;
+      if (!hidden) output += pending.slice(0,pending.length - keep);
+      pending = keep ? pending.slice(-keep) : '';
+      break;
+    }
+    return output;
+  };
+}
 async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
   const response = await providerRequest(endpoint,key,signal,{
     method:'POST',body:JSON.stringify({model,messages,stream:true})
   });
+  const redact = replyText();
   if (!response.headers.get('content-type')?.includes('text/event-stream')) {
     const payload = await response.json().catch(() => null);
     const content = payload?.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || !content.trim()) throw Error('The provider returned no response.');
-    onPart(content);
-    return content;
+    const visible = redact(content,true);
+    if (!visible.trim()) throw Error('The model returned no visible answer.');
+    onPart(visible);
+    return visible;
   }
   let result = '', buffer = '';
   const decoder = new TextDecoder();
   const reader = response.body.getReader();
+  function finish() {
+    const tail = redact('',true);
+    result += tail;
+    if (!result.trim()) throw Error('The model returned no visible answer.');
+    if (tail) onPart(result);
+    return result;
+  }
   try {
     while (true) {
       const {value, done} = await reader.read();
@@ -123,22 +178,21 @@ async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
         if (!line.startsWith('data:')) continue;
         const payload = line.slice(5).trim();
         if (payload === '[DONE]') {
-          if (!result.trim()) throw Error('The provider returned no response.');
-          return result;
+          return finish();
         }
         let event;
         try { event = JSON.parse(payload); } catch { throw Error('The AI endpoint returned invalid streaming data.'); }
         if (event.error) throw Error('The AI server could not run this model. Check that it is available and supports chat completions.');
         const delta = event.choices?.[0]?.delta?.content;
         if (typeof delta === 'string') {
-          result += delta;
-          onPart(result);
+          const text = redact(delta);
+          result += text;
+          if (text) onPart(result);
         }
       }
       if (done) break;
     }
-    if (!result.trim()) throw Error('The provider returned no response.');
-    return result;
+    return finish();
   } catch (error) {
     if (signal?.aborted && signal.reason?.name === 'TimeoutError') throw Error('The AI request timed out.');
     throw error;
@@ -146,4 +200,4 @@ async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
     await reader.cancel().catch(() => {});
   }
 }
-module.exports = {isWake, stripWake, calculate, parse, streamChat, verifyModel, personality};
+module.exports = {isWake, stripWake, calculate, parse, streamChat, verifyModel, detectOllama, ollamaDefaults, containsCredential, personality};

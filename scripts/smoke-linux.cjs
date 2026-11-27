@@ -44,6 +44,10 @@ const fs = require('node:fs/promises');
   try {
     let page = await launch();
     await page.locator('#core canvas').waitFor();
+    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await page.getByLabel('Save conversations locally and include recent turns in AI context').check();
+    await page.getByRole('button',{name:'Save settings'}).click();
+    await page.locator('#settings-panel').waitFor({state:'hidden'});
     assert.equal(await page.locator('#core canvas').count(),1);
     const enter = async text => {
       await page.getByRole('textbox',{name:'Message or command'}).fill(text);

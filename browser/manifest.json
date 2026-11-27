@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "ELISSION Browser Bridge",
+  "version": "2.0.0",
+  "minimum_chrome_version": "116",
+  "description": "Connect ELISSION to a browser tab you explicitly allow.",
+  "permissions": ["activeTab", "scripting"],
+  "optional_host_permissions": ["https://www.google.com/*"],
+  "background": {"service_worker": "worker.js"},
+  "action": {"default_popup": "popup.html"}
+}

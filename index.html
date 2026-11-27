@@ -63,20 +63,30 @@
     <fieldset><legend>Activation &amp; window</legend>
       <label class="check span"><input name="wakeEnabled" type="checkbox">Enable hold-to-wake</label>
       <label>Hold key<input name="key" maxlength="1" required></label>
-      <label>Fallback shortcut<select name="hotkey"><option value="">Disabled</option><option value="Control+Space">Ctrl + Space</option><option value="Control+Shift+Space">Ctrl + Shift + Space</option><option value="Alt+Space">Alt + Space</option></select></label>
+      <label>Summon shortcut<select name="hotkey"><option value="">Disabled</option><option value="Control+Alt+Space">Ctrl + Alt + Space</option><option value="Control+Space">Ctrl + Space</option><option value="Control+Shift+Space">Ctrl + Shift + Space</option><option value="Alt+Space">Alt + Space</option></select></label>
       <label>Window position<select name="position"><option value="center">Centre</option><option value="right">Right</option></select></label>
       <label class="check"><input name="top" type="checkbox">Always on top</label>
+      <label>Overlay opacity (%)<input name="opacity" type="number" min="70" max="100" required></label>
+      <label class="check span"><input name="startup" type="checkbox">Start ELISSION when I sign in to Windows</label>
       <p class="span setting-note" id="activation-status" role="status"></p>
     </fieldset>
     <fieldset><legend>Conversation provider</legend>
+      <label class="check span"><input name="autoOllama" type="checkbox">Detect and connect to Ollama on startup</label>
       <label>Provider<select name="provider"><option value="off">Local commands only</option><option value="cloud">Cloud · OpenAI compatible</option><option value="local">Local · OpenAI compatible</option></select></label>
       <label>Model<input name="model" maxlength="200"></label>
       <label class="span">Chat completions URL<input name="endpoint" type="url" maxlength="2048"></label>
       <label class="span">API key<input name="secret" type="password" maxlength="4096" autocomplete="new-password"></label>
       <label class="check span"><input name="clearSecret" type="checkbox">Remove saved API key</label>
       <label class="check span"><input name="history" type="checkbox">Save conversations locally and include recent turns in AI context</label>
+      <label class="check span"><input name="memoryEnabled" type="checkbox">Enable personal memory</label>
       <label class="check span"><input name="sharePreferences" type="checkbox">Include saved preferences in AI context</label>
       <p class="span setting-note">Saving a new AI configuration sends a short test prompt and verifies that the model responds. For Ollama, start the server, run <code>ollama list</code>, and enter an installed model ID. The configured provider receives your chat prompts. Selected documents require separate confirmation.</p>
+    </fieldset>
+    <fieldset><legend>Browser connection</legend>
+      <p class="span setting-note">Load the bundled browser extension. Generate a pairing code, then paste it into the extension. Allow pages individually from its toolbar popup.</p>
+      <button type="button" id="browser-pair">Generate pairing code</button><button type="button" id="browser-off">Disconnect browser</button>
+      <input id="browser-code" class="span" aria-label="Browser pairing code" readonly hidden>
+      <p id="browser-status" class="span setting-note" role="status"></p>
     </fieldset>
     <fieldset><legend>Voice</legend>
       <label class="span">Windows voice<select name="voice"><option value="">Automatic</option></select></label>
@@ -86,7 +96,7 @@
       <label>Response length<select name="verbosity"><option>concise</option><option>balanced</option><option>detailed</option></select></label>
       <label class="check"><input name="speak" type="checkbox">Speak responses</label>
       <label class="check"><input name="continuous" type="checkbox">Listen for spoken follow-ups</label>
-      <label class="check span"><input name="spokenInterrupt" type="checkbox">Enable “Eli, stop” during playback</label>
+      <label class="check span"><input name="spokenInterrupt" type="checkbox">Enable “Eli, stop” during playback and voice-started tasks</label>
     </fieldset>
     <p class="form-error" id="settings-error" role="status"></p>
     <button id="save-settings" class="primary" type="submit">Save settings</button>

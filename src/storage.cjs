@@ -1,7 +1,7 @@
 const {DatabaseSync} = require('node:sqlite');
 const {safeStorage} = require('electron');
 const path = require('node:path');
-const defaults = {provider:'off',modelVerified:false,endpoint:'https://api.openai.com/v1/chat/completions',model:'gpt-4.1-mini',key:'I',wakeEnabled:true,hotkey:'Control+Space',voice:'',rate:-10,pitch:-12,style:'low',verbosity:'concise',speak:true,continuous:true,spokenInterrupt:false,sharePreferences:false,history:true,top:true,position:'center'};
+const defaults = {provider:'off',modelVerified:false,autoOllama:true,memoryEnabled:true,endpoint:'https://api.openai.com/v1/chat/completions',model:'gpt-4.1-mini',key:'I',wakeEnabled:false,hotkey:'Control+Alt+Space',voice:'',rate:-10,pitch:-12,style:'low',verbosity:'concise',speak:true,continuous:false,spokenInterrupt:false,sharePreferences:false,history:false,top:true,opacity:100,startup:false,position:'center'};
 function store(directory) {
   const db = new DatabaseSync(path.join(directory,'elission.sqlite'));
   db.exec(`PRAGMA journal_mode=WAL;
@@ -9,6 +9,9 @@ function store(directory) {
     CREATE TABLE IF NOT EXISTS turns (id INTEGER PRIMARY KEY, user TEXT NOT NULL, assistant TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY, type TEXT NOT NULL, text TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY, action TEXT NOT NULL, status TEXT NOT NULL, time TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS task_steps (task TEXT NOT NULL, step INTEGER NOT NULL, action TEXT NOT NULL, status TEXT NOT NULL,
+      PRIMARY KEY(task,step));
+    UPDATE task_steps SET status='interrupted' WHERE status='running';
     CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY, text TEXT NOT NULL, due INTEGER NOT NULL);
   `);
   function protect(text) {
@@ -25,7 +28,17 @@ function store(directory) {
   const read = key => db.prepare('SELECT value FROM config WHERE key=?').get(key)?.value;
   return {
     db,
-    settings:() => ({...defaults,...JSON.parse(read('settings') || '{}')}),
+    checkpoint:(task,step,action,status) => db.prepare('INSERT INTO task_steps VALUES (?,?,?,?) ON CONFLICT(task,step) DO UPDATE SET status=excluded.status').run(task,step,action,status),
+    settings:() => {
+      const saved = JSON.parse(read('settings') || '{}');
+      const settings = {...defaults,...saved};
+      if (saved.settingsVersion !== 2) {
+        if (saved.hotkey === 'Control+Space') settings.hotkey = defaults.hotkey;
+        settings.continuous = defaults.continuous;
+        settings.wakeEnabled = defaults.wakeEnabled;
+      }
+      return settings;
+    },
     saveConfiguration(settings, credential) {
       let encrypted;
       if (credential) {
@@ -36,7 +49,7 @@ function store(directory) {
       }
       db.exec('BEGIN');
       try {
-        put.run('settings',JSON.stringify(settings));
+        put.run('settings',JSON.stringify({...settings,settingsVersion:2}));
         if (encrypted) put.run('credential',encrypted);
         else if (credential === '') db.prepare("DELETE FROM config WHERE key='credential'").run();
         db.exec('COMMIT');

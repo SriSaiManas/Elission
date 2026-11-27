@@ -89,3 +89,26 @@ test('transport rejects unsafe endpoints, redirects, and provider errors', async
   await assert.rejects(streamChat({...options,endpoint:endpoint + '/redirect'}));
   await assert.rejects(streamChat({...options,endpoint}),/403.*credentials/);
 });
+
+test('separate model thinking and split think markers never reach the renderer', async t => {
+  const endpoint = await server(t,(_req,res) => {
+    res.writeHead(200,{'Content-Type':'text/event-stream'});
+    for (const delta of [
+      {content:'<th',reasoning_content:'separate trace'},
+      {content:'ink>private text</thi'},
+      {content:'nk>The answer.'}
+    ]) res.write('data: ' + JSON.stringify({choices:[{delta}]}) + '\n\n');
+    res.end('data: [DONE]\n');
+  });
+  const messages = [];
+  assert.equal(await streamChat({...request,endpoint,onPart:value => messages.push(value)}),'The answer.');
+  assert.deepEqual(messages,['The answer.']);
+});
+
+test('credential-shaped values are excluded from new memory',() => {
+  const {containsCredential} = require('../src/core.cjs');
+  assert.ok(containsCredential('My password is example'));
+  assert.ok(containsCredential('4111 1111 1111 1111'));
+  assert.ok(containsCredential('API key: example'));
+  assert.equal(containsCredential('Remember to read the API documentation.'),false);
+});

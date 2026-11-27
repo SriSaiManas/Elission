@@ -61,11 +61,16 @@ async function pack() {
     for (const name of ['dist','src','assets','package.json']) {
       await fs.cp(path.join(root,name),path.join(application,name),{recursive:true});
     }
+    const dependencies = path.join(application,'node_modules');
+    await fs.mkdir(dependencies);
+    await fs.cp(path.join(root,'node_modules','ws'),path.join(dependencies,'ws'),{recursive:true});
+    await fs.cp(path.join(root,'browser'),path.join(bundle,'BrowserExtension'),{recursive:true});
     await fs.mkdir(path.join(application,'windows'));
     for (const name of ['Elission.Windows.exe','Elission.Windows.exe.config']) {
       await fs.copyFile(path.join(native,name),path.join(application,'windows',name));
     }
     await fs.copyFile(path.join(root,'README.md'),path.join(bundle,'README.md'));
+    await fs.cp(path.join(root,'docs'),path.join(bundle,'docs'),{recursive:true});
     await fs.copyFile(path.join(root,'node_modules','three','LICENSE'),path.join(bundle,'Three.js-LICENSE.txt'));
     await fs.mkdir(destination,{recursive:true});
     const zip = new yazl.ZipFile();

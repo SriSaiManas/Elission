@@ -12,6 +12,7 @@ using System.Speech.Synthesis;
 using System.Text;
 using System.ComponentModel;
 using System.Threading;
+using System.Windows.Automation;
 using System.Web.Script.Serialization;
 
 internal static class Program {
@@ -265,7 +266,7 @@ internal static class Program {
                     default: throw new ArgumentException("Unsupported media command.");
                 }
                 return "Media control sent.";
-            case "close": case "switch": return Window(action,value);
+            case "close": case "switch": case "inspect_window": return Window(action,value);
             case "move":
                 File.Move(Field(request,"source"),Field(request,"destination"));
                 return "File moved.";
@@ -292,6 +293,7 @@ internal static class Program {
             if (matches.Length != 1) throw new InvalidOperationException("Found " + matches.Length + " matching windows. Use a more specific title.");
             var target = matches[0];
             var title = target.MainWindowTitle;
+            if (action == "inspect_window") return InspectWindow(target.MainWindowHandle,title);
             if (action == "close") {
                 if (!target.CloseMainWindow()) throw new InvalidOperationException("The window did not accept the close request.");
                 return "Close requested for " + title + ".";
@@ -302,6 +304,30 @@ internal static class Program {
         } finally {
             foreach (var process in processes) process.Dispose();
         }
+    }
+
+    private static string InspectWindow(IntPtr handle, string title) {
+        var root = AutomationElement.FromHandle(handle);
+        if (root == null) throw new InvalidOperationException("The selected window is no longer available.");
+        var walker = TreeWalker.ControlViewWalker;
+        var output = new List<string> { title };
+        var queue = new Queue<AutomationElement>();
+        queue.Enqueue(root);
+        int scanned = 0;
+        while (queue.Count > 0 && scanned++ < 100) {
+            var element = queue.Dequeue();
+            try {
+                var item = element.Current;
+                if (item.IsPassword || item.IsOffscreen) continue;
+                string name = item.Name ?? "";
+                if (name.Length > 0) output.Add(item.ControlType.ProgrammaticName.Replace("ControlType.", "") + ": " + name.Substring(0,Math.Min(160,name.Length)));
+                for (var child = walker.GetFirstChild(element); child != null && queue.Count < 100; child = walker.GetNextSibling(child))
+                    queue.Enqueue(child);
+            } catch (ElementNotAvailableException) {
+                // The window can change during enumeration.
+            }
+        }
+        return string.Join(Environment.NewLine, output);
     }
 
     private static string Status(string value) {

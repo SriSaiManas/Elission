@@ -49,9 +49,9 @@ function setPrefs(value,hasKey) {
 }
 function drawActivation() {
   if (!prefs) return;
-  $('hint').textContent = windows && prefs.wakeEnabled && activation.wakeReady
-    ? 'HOLD ' + prefs.key + ' + SAY “ELI”'
-    : activation.shortcutReady ? prefs.hotkey.replace('Control','Ctrl').replaceAll('+',' + ') : 'TYPE A COMMAND';
+  $('hint').textContent = activation.paused ? 'PAUSED' : activation.shortcutReady
+    ? prefs.hotkey.replace('Control','Ctrl').replaceAll('+',' + ')
+    : windows && prefs.wakeEnabled && activation.wakeReady ? 'HOLD ' + prefs.key + ' + SAY “ELI”' : 'TYPE A COMMAND';
   $('activation-status').textContent = activation.error || (windows && prefs.wakeEnabled
     ? (activation.wakeReady ? 'Wake recognition ready.' : 'Preparing Windows wake recognition…') : '');
 }
@@ -107,6 +107,31 @@ if (api) {
     reminderQueue.shift();
     displayReminder();
   });
+  api['on-preferences'](next => setPrefs(next.settings,next.credential));
+  const browserState = async () => {
+    if (!settingsPanel.open) return;
+    try { $('browser-status').textContent = await api['browser-status']() ? 'Browser connected.' : 'Browser disconnected.'; }
+    catch { $('browser-status').textContent = 'Browser connection unavailable.'; }
+  };
+  $('browser-pair').addEventListener('click',async () => {
+    try {
+      const input = $('browser-code');
+      input.value = await api['browser-pair']();
+      input.hidden = false;
+      input.select();
+      $('browser-status').textContent = 'Copy the code into the browser extension.';
+    } catch (error) { $('browser-status').textContent = error.message; }
+  });
+  $('browser-off').addEventListener('click',async () => {
+    await api['browser-off']();
+    $('browser-code').value = '';
+    $('browser-code').hidden = true;
+    void browserState();
+  });
+  settingsPanel.addEventListener('close',() => {
+    $('browser-code').value = '';
+    $('browser-code').hidden = true;
+  });
   api['on-activation-status'](next => { activation = next; drawActivation(); });
   api['on-open-settings'](() => {
     if (prefs) $('settings').click();
@@ -152,6 +177,7 @@ if (api) {
     settingsForm.elements.clearSecret.checked = false;
     $('settings-error').textContent = '';
     settingsPanel.showModal();
+    void browserState();
     try {
       const names = await api.voices();
       if (generation !== settingsVersion || !settingsPanel.open) return;
@@ -163,10 +189,10 @@ if (api) {
   settingsForm.elements.provider.addEventListener('change',() => {
     const {provider,endpoint,model} = settingsForm.elements;
     const cloud = 'https://api.openai.com/v1/chat/completions';
-    const local = 'http://127.0.0.1:11434/v1/chat/completions';
+    const local = 'http://localhost:11434/v1/chat/completions';
     if (provider.value === 'local' && (!endpoint.value || endpoint.value === cloud)) {
       endpoint.value = local;
-      model.value = '';
+      model.value = 'qwen3.5:4b';
     } else if (provider.value === 'cloud' && (!endpoint.value || endpoint.value === local)) {
       endpoint.value = cloud;
       model.value = 'gpt-4.1-mini';

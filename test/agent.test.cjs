@@ -7,7 +7,7 @@ const {parsePlan,runPlan} = require('../src/tasks.cjs');
 const {parse} = require('../src/core.cjs');
 
 test('Google intent encodes the complete query and validates the destination and query',() => {
-  assert.deepEqual(parse('Search Google for LELOUCH Vi Britannia'),{action:'web',value:'LELOUCH Vi Britannia'});
+  assert.deepEqual(parse('Search Google for LELOUCH Vi Britannia'),{action:'web_google',value:'LELOUCH Vi Britannia'});
   const url = googleSearch('a & b + c');
   assert.equal(new URL(url).searchParams.get('q'),'a & b + c');
   assert.ok(verifySearch(url,'a & b + c'));

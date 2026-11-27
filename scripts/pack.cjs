@@ -22,11 +22,10 @@ async function addDirectory(zip, directory, archivePath) {
   }
 }
 
-async function unpack(filename,destination) {
-  const expected = '20155c8b8aa5b1f575f3757bdf21490e0bac2f19a65a26ce9ba99bcf9f2c69bd';
+async function unpack(filename,destination,expected) {
   const checksum = createHash('sha256');
   for await (const chunk of createReadStream(filename)) checksum.update(chunk);
-  if (checksum.digest('hex') !== expected) throw Error('Electron Windows runtime checksum mismatch.');
+  if (checksum.digest('hex') !== expected) throw Error('Package checksum mismatch: ' + path.basename(filename));
   const archive = await openPromise(filename,{strictFileNames:true});
   try {
     for await (const entry of archive.eachEntry()) {
@@ -53,7 +52,7 @@ async function pack() {
   const filename = path.join(destination,'ELISSION-Windows-x64.zip');
   try {
     await fs.mkdir(bundle);
-    await unpack(path.resolve(archive),bundle);
+    await unpack(path.resolve(archive),bundle,'20155c8b8aa5b1f575f3757bdf21490e0bac2f19a65a26ce9ba99bcf9f2c69bd');
     await fs.rename(path.join(bundle,'electron.exe'),path.join(bundle,'ELISSION.exe'));
     const application = path.join(bundle,'resources','app');
     await fs.mkdir(application,{recursive:true});
@@ -63,12 +62,29 @@ async function pack() {
     }
     const dependencies = path.join(application,'node_modules');
     await fs.mkdir(dependencies);
-    await fs.cp(path.join(root,'node_modules','ws'),path.join(dependencies,'ws'),{recursive:true});
+    for (const name of ['ws','parse5','entities']) {
+      await fs.cp(path.join(root,'node_modules',name),path.join(dependencies,name),{recursive:true});
+    }
     await fs.cp(path.join(root,'browser'),path.join(bundle,'BrowserExtension'),{recursive:true});
     await fs.mkdir(path.join(application,'windows'));
-    for (const name of ['Elission.Windows.exe','Elission.Windows.exe.config']) {
-      await fs.copyFile(path.join(native,name),path.join(application,'windows',name));
+    for (const name of [
+      'Elission.Windows.exe','Elission.Windows.exe.config','Vosk.dll','NAudio.Core.dll','NAudio.WinMM.dll',
+      'Microsoft.Win32.Registry.dll','System.Security.AccessControl.dll','System.Security.Principal.Windows.dll',
+      'libvosk.dll','libstdc++-6.dll','libwinpthread-1.dll','libgcc_s_seh-1.dll'
+    ]) await fs.copyFile(path.join(native,name),path.join(application,'windows',name));
+    let speechArchive = process.env.ELISSION_VOSK_MODEL_ZIP;
+    if (!speechArchive) {
+      speechArchive = path.join(stage,'speech.zip');
+      const response = await fetch('https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip',{
+        redirect:'error',signal:AbortSignal.timeout(120000)
+      });
+      if (!response.ok || !response.body) throw Error('Could not download the offline English speech model.');
+      await pipeline(response.body,createWriteStream(speechArchive));
     }
+    const speechStage = path.join(stage,'speech');
+    await fs.mkdir(speechStage);
+    await unpack(path.resolve(speechArchive),speechStage,'30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498');
+    await fs.rename(path.join(speechStage,'vosk-model-small-en-us-0.15'),path.join(application,'windows','speech-en'));
     await fs.copyFile(path.join(root,'README.md'),path.join(bundle,'README.md'));
     await fs.cp(path.join(root,'docs'),path.join(bundle,'docs'),{recursive:true});
     await fs.copyFile(path.join(root,'node_modules','three','LICENSE'),path.join(bundle,'Three.js-LICENSE.txt'));

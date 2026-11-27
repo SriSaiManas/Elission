@@ -51,7 +51,12 @@ internal static class Program {
                 case "keys": Watch(int.Parse(args[1])); break;
                 case "voices": Voices(); break;
                 case "wake-service": WakeService(); break;
-                case "dictation": case "interrupt": Listen(args[0]); break;
+                case "dictation":
+                    var modelDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"speech-en");
+                    if (Directory.Exists(modelDirectory)) Voice.Dictate(modelDirectory);
+                    else Listen("dictation");
+                    break;
+                case "interrupt": Listen(args[0]); break;
                 case "speak": Speak(args[1], Read()); break;
                 case "system": Console.WriteLine(Execute(Read())); break;
                 default: throw new ArgumentException("Unsupported Windows operation.");

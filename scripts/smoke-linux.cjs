@@ -140,6 +140,15 @@ const fs = require('node:fs/promises');
         && document.querySelector('#answer').textContent.trim().length > 0,null,{timeout:30000});
       console.log('PASS real model connection verification and chat response:', (await page.locator('#answer').innerText()).slice(0,160));
     }
+    if (process.env.ELISSION_LIVE_SEARCH === '1') {
+      await app.evaluate(({dialog}) => { dialog.showMessageBox = async () => ({response:1}); });
+      await enter('Could you look up Lelouch vi Britannia?');
+      await page.locator('#answer a').first().waitFor({timeout:65000});
+      const href = await page.locator('#answer a').first().getAttribute('href');
+      assert.match(href,/^https?:/);
+      assert.match(await page.locator('#answer').innerText(),/Lelouch/i);
+      console.log('PASS real web research results and source links without extension');
+    }
     assert.deepEqual(errors,[]);
     console.log('PASS compact, fullscreen, sleep, persisted settings/history/memory, no renderer errors');
   } finally {

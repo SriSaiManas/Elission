@@ -43,6 +43,7 @@ function calculate(input) {
   return result;
 }
 function parse(text) {
+  text = text.trim().replace(/^(?:(?:hey\s+)?(?:eli|ellie)[,.:]?\s+|(?:can|could|would) you\s+|please\s+)+/i,'');
   const documentCommand = text.match(/^(open)(?: a| the)? (?:file|folder)$/i);
   if (documentCommand) return {action:'pick',value:/folder$/i.test(text) ? 'folder' : 'file'};
   for (const [regex, action] of [
@@ -54,8 +55,10 @@ function parse(text) {
     [/^(inspect) (?:a |the )?project(?: folder)?[.!]?$/i,'project'],
     [/^(?:plan and run|run task)\s+(.+)$/is,'task'],
     [/^(?:open|launch)\s+(.+)$/i,'open'], [/^close\s+(.+)$/i,'close'], [/^switch to\s+(.+)$/i,'switch'],
+    [/^(?:search Google(?: for)?|google)\s+(.+)$/i,'web_google'],
+    [/^(?:look up|look this up|find out|research)\s+(.+)$/i,'web'],
     [/^find (documentation for .+)$/i,'web'],
-    [/^(?:find|search installed apps(?: for)?)\s+(.+)$/i,'apps'], [/^(?:search(?: the web| Google)? for|google)\s+(.+)$/i,'web'],
+    [/^(?:find|search installed apps(?: for)?)\s+(.+)$/i,'apps'], [/^search(?: the web)? for\s+(.+)$/i,'web'],
     [/^(?:set )?volume(?: to)? (\d+)%?$/i,'volume'], [/^(?:set )?brightness(?: to)? (\d+)%?$/i,'brightness'],
     [/^(mute|unmute)(?: audio)?$/i,'mute'], [/^(play|pause|next track|previous track)$/i,'media'],
     [/^(?:take (?:a )?)?(screenshot)$/i,'screenshot'],

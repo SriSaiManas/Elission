@@ -39,6 +39,9 @@ function run(script, args, request, signal, timeout = 25000, onAudio) {
       for (const raw of lines) {
         const line = raw.trim();
         if (line === 'ready') onAudio?.({ready:true});
+        else if (line.startsWith('partial:')) {
+          try { onAudio?.({partial:JSON.parse(line.slice(8))}); } catch { /* Ignore invalid partial telemetry. */ }
+        }
         else if (/^level:\d+$/.test(line)) onAudio?.({level:Number(line.slice(6)) / 100});
         else stderr += line + '\n';
       }

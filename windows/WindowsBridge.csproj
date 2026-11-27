@@ -14,6 +14,11 @@
     <Reference Include="UIAutomationTypes" />
     <Reference Include="System.Speech" />
     <Reference Include="System.Web.Extensions" />
+    <PackageReference Include="Vosk" Version="0.3.38" GeneratePathProperty="true" ExcludeAssets="build" />
+    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(PkgVosk)/build/lib/win-x64/*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

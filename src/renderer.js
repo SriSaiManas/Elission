@@ -19,13 +19,29 @@ function displayReminder() {
   $('reminder-banner').hidden = !reminderQueue.length;
 }
 
+function showResponse(value) {
+  const answer = $('answer');
+  if (answer.textContent === value) return;
+  const pieces = value.split(/(https?:\/\/[^\s<]+)(?=\s|$)/g);
+  answer.replaceChildren(...pieces.map((piece,index) => {
+    if (index % 2 === 0 || !piece) return document.createTextNode(piece);
+    const link = document.createElement('a');
+    link.href = piece;
+    link.textContent = piece;
+    link.addEventListener('click',event => {
+      event.preventDefault();
+      void call('open-source',piece);
+    });
+    return link;
+  }));
+}
 function draw() {
   const {phase,message,transcript,response,microphone} = state;
   $('viewport').dataset.phase = phase;
   $('phase').textContent = phase;
   $('message').textContent = message;
   $('heard').textContent = transcript;
-  $('answer').textContent = response;
+  showResponse(response || '');
   $('transcript').hidden = !transcript && !response;
   $('stop').hidden = !['activating','listening','thinking','speaking','executing'].includes(phase);
   const live = microphone || (phase === 'listening' && message === 'Microphone active');

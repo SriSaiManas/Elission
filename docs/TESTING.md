@@ -27,3 +27,8 @@ No Windows machine or ASUS ROG hardware was available. Tests below remain pendin
 | 15 | Upgrade preserves data | Installer staging and rollback paths compiled. Windows upgrade and uninstall pending |
 
 Before a stable release, also test elevated or exclusive full-screen apps, microphone and accessibility permissions, Ollama qwen3.5:4b performance on the RTX 4050, real Chrome and Edge toolbar grants, and installation over the previous version while it is closed.
+
+## Alpha 2 voice and research
+
+- The Windows voice helper cross-compiles with the offline Vosk recognizer and NAudio microphone capture. On Linux the same Vosk version and English model transcribed the upstream sample audio. Live Windows microphone access, device selection, and endpointing still require hardware validation.
+- The DuckDuckGo parser returned live titles, snippets, and links for the reported Lelouch query. Automated fixtures check routing, unsafe-link exclusion, deduplication, and the no-results error. The preview does not attempt to bypass search-provider challenges.

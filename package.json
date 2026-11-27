@@ -1,6 +1,6 @@
 {
   "name": "elission",
-  "version": "2.0.0-alpha.1",
+  "version": "2.0.0-alpha.2",
   "description": "ELISSION Windows desktop companion",
   "main": "src/main.cjs",
   "private": true,
@@ -13,6 +13,7 @@
     "test:desktop": "npm run build && node scripts/smoke-linux.cjs"
   },
   "dependencies": {
+    "parse5": "7.3.0",
     "three": "0.180.0",
     "ws": "8.21.0"
   },

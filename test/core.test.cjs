@@ -112,3 +112,25 @@ test('credential-shaped values are excluded from new memory',() => {
   assert.ok(containsCredential('API key: example'));
   assert.equal(containsCredential('Remember to read the API documentation.'),false);
 });
+
+test('native Ollama streams visible tokens with thinking off and requests a warm, bounded model',async t => {
+  const {nativeOllama,ollamaChat} = require('../src/core.cjs');
+  assert.equal(nativeOllama('http://127.0.0.1:11434/v1/chat/completions').pathname,'/api/chat');
+  assert.equal(nativeOllama('http://127.0.0.1:1234/v1/chat/completions'),null);
+  let body;
+  const endpoint = await server(t,async (req,res) => {
+    let received = '';
+    for await (const chunk of req) received += chunk;
+    body = JSON.parse(received);
+    res.writeHead(200,{'Content-Type':'application/x-ndjson'});
+    res.write('{"message":{"thinking":"private","content":"Quick"},"done":false}\n');
+    res.end('{"message":{"content":" answer."},"done":true}');
+  });
+  const updates = [];
+  const result = await ollamaChat(endpoint,{...request,maxTokens:256,onPart:value => updates.push(value)});
+  assert.equal(result,'Quick answer.');
+  assert.deepEqual(updates,['Quick','Quick answer.']);
+  assert.equal(body.think,false);
+  assert.equal(body.keep_alive,'15m');
+  assert.deepEqual(body.options,{num_ctx:4096,num_predict:256});
+});

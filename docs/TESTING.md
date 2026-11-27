@@ -32,3 +32,9 @@ Before a stable release, also test elevated or exclusive full-screen apps, micro
 
 - The Windows voice helper cross-compiles with the offline Vosk recognizer and NAudio microphone capture. On Linux the same Vosk version and English model transcribed the upstream sample audio. Live Windows microphone access, device selection, and endpointing still require hardware validation.
 - The DuckDuckGo parser returned live titles, snippets, and links for the reported Lelouch query. Automated fixtures check routing, unsafe-link exclusion, deduplication, and the no-results error. The preview does not attempt to bypass search-provider challenges.
+
+## Alpha 3 performance and LeetCode
+
+- Transport tests verify native Ollama request limits, disabled thinking, keep-alive, and streaming output without reasoning traces. Local hardware speed was not benchmarked.
+- Natural-language tests cover the exact compound request, number lookup, several spoken number forms, explicit repeat counts, and an instruction to avoid submitting.
+- A Chromium test uses a simulated LeetCode editor page to verify same-document code insertion, zero clicks before a submit request, and independent fresh receipts. The actual public LeetCode catalog and problem description for 1124 were checked. Live signed-in editor compatibility and judging are pending.

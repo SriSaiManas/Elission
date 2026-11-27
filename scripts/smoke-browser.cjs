@@ -14,7 +14,7 @@ const {browserBridge} = require('../src/browser.cjs');
   // through Playwright, which cannot press Chrome's toolbar action.
   const manifestPath = path.join(extension,'manifest.json');
   const manifest = JSON.parse(await fs.readFile(manifestPath,'utf8'));
-  manifest.host_permissions = ['http://127.0.0.1/*','https://www.google.com/*'];
+  manifest.host_permissions = ['http://127.0.0.1/*','https://www.google.com/*','https://leetcode.com/*'];
   await fs.writeFile(manifestPath,JSON.stringify(manifest));
   const fixture = http.createServer((_request,response) => response.end(
     '<!doctype html><title>Fixture page</title><table><tr><th>Animal</th><td>Capybara</td></tr></table><label>Comments<textarea maxlength="50"></textarea></label>'
@@ -26,7 +26,7 @@ const {browserBridge} = require('../src/browser.cjs');
     await new Promise(resolve => fixture.listen(0,'127.0.0.1',resolve));
     context = await chromium.launchPersistentContext(path.join(temporary,'profile'),{
       executablePath:process.env.ELISSION_CHROMIUM,
-      channel:'chromium',headless:true,ignoreDefaultArgs:['--disable-extensions'],
+      channel:'chromium',headless:true,ignoreHTTPSErrors:true,ignoreDefaultArgs:['--disable-extensions'],
       args:['--disable-extensions-except='+extension,'--load-extension='+extension,'--no-sandbox']
     });
     const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker',{timeout:15000});
@@ -58,6 +58,30 @@ const {browserBridge} = require('../src/browser.cjs');
     await context.route('https://www.google.com/search?*',route => route.fulfill({body:'<!doctype html><title>Search fixture</title>'}));
     const navigation = await bridge.request('search',{query:'LELOUCH Vi Britannia'});
     assert.equal(new URL(navigation.url).searchParams.get('q'),'LELOUCH Vi Britannia');
+    await context.route('https://leetcode.com/**',route => route.fulfill({contentType:'text/html',body:
+      '<!doctype html><div data-track-load="description_content">Return the longest interval.</div>'
+      + '<div id="editor">Editor</div><button data-e2e-locator="console-submit-button">Submit</button>'
+      + '<a href="/problems/interval/submissions/111/">Previous</a><div data-e2e-locator="submission-result">Accepted</div>'
+      + '<script>window.value="starter"; window.monaco={editor:{getEditors:()=>[{getDomNode:()=>document.querySelector("#editor"),getModel:()=>({getLanguageId:()=>"python",getFullModelRange:()=>({}),getValue:()=>window.value}),pushUndoStop:()=>{},executeEdits:(_,edits)=>{window.value=edits[0].text;return true;}}]}};'
+      + 'document.querySelector("button").onclick=()=>{window.submissions=(window.submissions||0)+1; const link=document.createElement("a");link.href="/problems/interval/submissions/"+(111+window.submissions)+"/";link.textContent="New submission";document.body.appendChild(link);};</script>'}));
+    const editor = await context.newPage();
+    await editor.goto('https://leetcode.com/problems/interval/');
+    await editor.bringToFront();
+    const lc = await bridge.request('leetcode_open',{slug:'interval',chrome:true,describe:true});
+    assert.match(lc.description,/longest interval/);
+    const solution = 'class Solution:\n    pass';
+    assert.deepEqual(await bridge.request('leetcode_editor',{target:lc,code:solution}),{filled:true});
+    assert.equal(await editor.evaluate(() => window.value),solution);
+    assert.equal(await editor.evaluate(() => window.submissions || 0),0);
+    const receipt = await bridge.request('leetcode_submit',{target:lc});
+    assert.equal(receipt.verified,true);
+    assert.equal(receipt.id,'112');
+    assert.equal(receipt.status,null);
+    assert.equal(await editor.evaluate(() => window.submissions),1);
+    const second = await bridge.request('leetcode_submit',{target:lc});
+    assert.equal(second.id,'113');
+    assert.equal(await editor.evaluate(() => window.submissions),2);
+    console.log('PASS Chromium fixture workflow opens a problem, inserts code, and observes separate new receipts');
     console.log('PASS Chromium fixture navigation verified the exact encoded Google query');
     console.log('PASS Chromium extension pairing, per-document approval, table extraction, verified textarea fill, and navigation revocation');
   } finally {

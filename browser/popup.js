@@ -24,5 +24,9 @@ bind('google',async () => {
   const granted = await chrome.permissions.request({origins:['https://www.google.com/*']});
   status.textContent = granted ? 'Verified search enabled.' : 'Search permission was declined.';
 });
+bind('leetcode',async () => {
+  const granted = await chrome.permissions.request({origins:['https://leetcode.com/*']});
+  status.textContent = granted ? 'LeetCode workflows enabled.' : 'LeetCode permission was declined.';
+});
 bind('disconnect',() => request({action:'disconnect'}));
 request({action:'status'}).catch(() => { status.textContent = 'Desktop connection unavailable.'; });

@@ -90,7 +90,7 @@ function browserBridge(port = 18461) {
     request(action, args, signal) {
       signal?.throwIfAborted();
       if (connection?.readyState !== 1) throw Error('Connect the ELISSION browser extension in Settings.');
-      if (!['search','observe','draft'].includes(action) || pending.size >= 4) throw Error('Browser action unavailable.');
+      if (!['search','observe','draft','leetcode_open','leetcode_editor','leetcode_submit'].includes(action) || pending.size >= 4) throw Error('Browser action unavailable.');
       const id = randomUUID();
       const peer = connection;
       return new Promise((resolve,reject) => {
@@ -107,7 +107,7 @@ function browserBridge(port = 18461) {
         const timer = setTimeout(() => {
           if (peer.readyState === 1) peer.send(JSON.stringify({type:'cancel',id}),() => {});
           finish(reject,Error('The browser did not verify this action before the timeout.'));
-        },18000);
+        },action === 'leetcode_submit' ? 45000 : 23000);
         pending.set(id,{resolve:value => finish(resolve,value), reject:error => finish(reject,error)});
         signal?.addEventListener('abort',abort,{once:true});
         peer.send(JSON.stringify({type:'job',id,action,args}),error => {

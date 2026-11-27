@@ -71,3 +71,17 @@ test('Java drafts create a new file and preserve an existing source file',async 
   await assert.rejects(createJavaFile(filename,'Example','class Example { int changed; }'),/already exists/);
   assert.equal(await fs.readFile(filename,'utf8'),'public class Example {}\n');
 });
+
+test('LeetCode understands the natural compound workflow and spoken problem numbers',() => {
+  const {intent,findProblem} = require('../src/workflow.cjs');
+  assert.deepEqual(intent('Open chrome, go to leetcode and solve problem 1124, submit it'),
+    {query:'1124',chrome:true,solve:true,submit:true,count:1});
+  assert.equal(intent('Solve lead code problem eleven twenty four, submit twice').query,'1124');
+  assert.equal(intent('Solve LeetCode problem one one two four').query,'1124');
+  assert.equal(intent('Solve LeetCode problem one thousand one hundred twenty four').query,'1124');
+  assert.equal(intent('Solve LeetCode problem 1124 but do not submit').submit,false);
+  assert.equal(intent('Submit the current LeetCode solution three times').count,3);
+  const entries = [{stat:{frontend_question_id:1124,question__title:'Longest Well-Performing Interval',question__title_slug:'longest-well-performing-interval'}}];
+  assert.equal(findProblem(entries,'1124').url,'https://leetcode.com/problems/longest-well-performing-interval/');
+  assert.equal(findProblem(entries,'Longest Well Performing Interval').slug,'longest-well-performing-interval');
+});

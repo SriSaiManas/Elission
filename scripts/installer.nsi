@@ -4,10 +4,10 @@ OutFile "${SETUP_OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\ELISSION"
 RequestExecutionLevel user
 SetCompressor zlib
-VIProductVersion "2.0.0.2"
+VIProductVersion "2.0.0.3"
 VIAddVersionKey "ProductName" "ELISSION"
-VIAddVersionKey "ProductVersion" "2.0.0-alpha.2"
-VIAddVersionKey "FileVersion" "2.0.0-alpha.2"
+VIAddVersionKey "ProductVersion" "2.0.0-alpha.3"
+VIAddVersionKey "FileVersion" "2.0.0-alpha.3"
 VIAddVersionKey "FileDescription" "ELISSION Windows x64 Setup"
 VIAddVersionKey "LegalCopyright" "ELISSION"
 !include "MUI2.nsh"
@@ -74,7 +74,7 @@ publish:
   SetOutPath "$INSTDIR"
   CreateShortcut "$SMPROGRAMS\ELISSION.lnk" "$INSTDIR\ELISSION.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ELISSION" "DisplayName" "ELISSION"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ELISSION" "DisplayVersion" "2.0.0-alpha.2"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ELISSION" "DisplayVersion" "2.0.0-alpha.3"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ELISSION" "DisplayIcon" "$INSTDIR\ELISSION.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ELISSION" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ELISSION" "NoModify" 1

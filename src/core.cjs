@@ -111,7 +111,7 @@ async function verifyModel({provider,endpoint,model,key,signal}) {
   return streamChat({
     endpoint,model,key,signal,
     messages:[{role:'user',content:'Reply with the word OK.'}],
-    onPart:() => {}
+    onPart:() => {}, maxTokens:24
   });
 }
 const ollamaDefaults = {
@@ -147,7 +147,61 @@ function replyText() {
     return output;
   };
 }
-async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
+function nativeOllama(endpoint) {
+  const url = new URL(endpoint);
+  if (url.protocol !== 'http:' || !['localhost','127.0.0.1','[::1]'].includes(url.hostname)
+    || url.port !== '11434' || url.pathname !== '/v1/chat/completions' || url.username || url.password || url.search || url.hash) return null;
+  url.pathname = '/api/chat';
+  return url;
+}
+
+async function warmOllama(endpoint,model,key,signal) {
+  const url = nativeOllama(endpoint);
+  if (!url) return;
+  const response = await providerRequest(url,key,signal,{
+    method:'POST',body:JSON.stringify({model,messages:[],stream:false,keep_alive:'15m',options:{num_ctx:4096}})
+  });
+  await response.body?.cancel();
+}
+
+async function ollamaChat(url,{model,key,messages,signal,onPart,maxTokens}) {
+  const response = await providerRequest(url,key,signal,{
+    method:'POST',
+    body:JSON.stringify({model,messages,stream:true,think:false,keep_alive:'15m',
+      options:{num_ctx:4096,num_predict:maxTokens}})
+  });
+  if (!response.body) throw Error('Ollama returned an empty response.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const redact = replyText();
+  let result = '', buffer = '', complete = false;
+  function receive(line) {
+    if (!line.trim()) return;
+    let event;
+    try { event = JSON.parse(line); } catch { throw Error('Ollama returned invalid streaming data.'); }
+    if (event.error) throw Error('Ollama could not run this model. Check the server status and model settings.');
+    const next = typeof event.message?.content === 'string' ? redact(event.message.content) : '';
+    if (next) { result += next; onPart(result); }
+    complete ||= event.done === true;
+  }
+  try {
+    while (!complete) {
+      const {value,done} = await reader.read();
+      buffer += decoder.decode(value,{stream:!done});
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) receive(line);
+      if (done) { receive(buffer); break; }
+    }
+    if (!complete || !result.trim()) throw Error('Ollama did not finish a visible response.');
+    const tail = redact('',true);
+    if (tail) { result += tail; onPart(result); }
+    return result;
+  } finally { await reader.cancel().catch(() => {}); }
+}
+async function streamChat({ endpoint, model, key, messages, signal, onPart, maxTokens = 384 }) {
+  const native = nativeOllama(endpoint);
+  if (native) return ollamaChat(native,{model,key,messages,signal,onPart,maxTokens});
   const response = await providerRequest(endpoint,key,signal,{
     method:'POST',body:JSON.stringify({model,messages,stream:true})
   });
@@ -203,4 +257,4 @@ async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
     await reader.cancel().catch(() => {});
   }
 }
-module.exports = {isWake, stripWake, calculate, parse, streamChat, verifyModel, detectOllama, ollamaDefaults, containsCredential, personality};
+module.exports = {isWake, stripWake, calculate, parse, streamChat, verifyModel, detectOllama, ollamaDefaults, nativeOllama, ollamaChat, warmOllama, containsCredential, personality};

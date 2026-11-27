@@ -1,4 +1,5 @@
 'use strict';
+importScripts('leetcode.js');
 let connection, keepalive, granted;
 const jobs = new Map();
 
@@ -100,8 +101,8 @@ async function handleJob(peer,{id,action,args}) {
   const job = new AbortController();
   jobs.set(id,job);
   try {
-    if (!['search','observe','draft'].includes(action)) throw Error('Unsupported browser action.');
-    const result = action === 'search' ? await search(args.query,job.signal) : await page(action,args,job.signal);
+    if (!['search','observe','draft','leetcode_open','leetcode_editor','leetcode_submit'].includes(action)) throw Error('Unsupported browser action.');
+    const result = action.startsWith('leetcode_') ? await self.leetcodeAction(action,args,job.signal) : action === 'search' ? await search(args.query,job.signal) : await page(action,args,job.signal);
     const envelope = JSON.stringify({id,result});
     if (new TextEncoder().encode(envelope).length > 90 * 1024) throw Error('This tab exposes more data than ELISSION can read in one snapshot.');
     if (!job.signal.aborted && peer.readyState === WebSocket.OPEN) peer.send(envelope);

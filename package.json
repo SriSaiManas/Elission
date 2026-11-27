@@ -1,6 +1,6 @@
 {
   "name": "elission",
-  "version": "2.0.0-alpha.2",
+  "version": "2.0.0-alpha.3",
   "description": "ELISSION Windows desktop companion",
   "main": "src/main.cjs",
   "private": true,

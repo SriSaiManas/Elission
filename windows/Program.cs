@@ -11,6 +11,7 @@ using System.Speech.Recognition;
 using System.Speech.Synthesis;
 using System.Text;
 using System.ComponentModel;
+using System.Threading;
 using System.Web.Script.Serialization;
 
 internal static class Program {
@@ -33,6 +34,9 @@ internal static class Program {
     [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
     [DllImport("user32.dll", SetLastError = true)] private static extern int GetMessage(out Message message, IntPtr window, uint min, uint max);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint thread, uint message, UIntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool PeekMessage(out Message message, IntPtr window, uint min, uint max, uint remove);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr handle);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr handle);
@@ -45,7 +49,8 @@ internal static class Program {
             switch (args[0]) {
                 case "keys": Watch(int.Parse(args[1])); break;
                 case "voices": Voices(); break;
-                case "wake": case "dictation": case "interrupt": Listen(args[0]); break;
+                case "wake-service": WakeService(); break;
+                case "dictation": case "interrupt": Listen(args[0]); break;
                 case "speak": Speak(args[1], Read()); break;
                 case "system": Console.WriteLine(Execute(Read())); break;
                 default: throw new ArgumentException("Unsupported Windows operation.");
@@ -67,6 +72,13 @@ internal static class Program {
 
     private static void Watch(int key) {
         bool down = GetAsyncKeyState(key) < 0;
+        var thread = GetCurrentThreadId();
+        PeekMessage(out _,IntPtr.Zero,0,0,0);
+        var lifetime = new Thread(() => {
+            while (Console.ReadLine() != null) {}
+            PostThreadMessage(thread,0x12,UIntPtr.Zero,IntPtr.Zero);
+        }) { IsBackground = true };
+        lifetime.Start();
         KeyboardCallback callback = (code,message,data) => {
             if (code == 0 && Marshal.ReadInt32(data) == key && (Marshal.ReadInt32(data,8) & 16) == 0) {
                 int id = message.ToInt32();
@@ -74,7 +86,7 @@ internal static class Program {
                 bool isUp = id == 0x101 || id == 0x105;
                 if ((isDown && !down) || (isUp && down)) {
                     down = isDown;
-                    Console.WriteLine(down ? "down" : "up");
+                    PostThreadMessage(thread,0x8001,new UIntPtr(down ? 1u : 0u),IntPtr.Zero);
                 }
             }
             return CallNextHookEx(IntPtr.Zero,code,message,data);
@@ -83,7 +95,9 @@ internal static class Program {
         if (hook == IntPtr.Zero) throw new Win32Exception();
         try {
             int result;
-            do { result = GetMessage(out _,IntPtr.Zero,0,0); } while (result > 0);
+            Console.WriteLine("ready");
+            while ((result = GetMessage(out var message,IntPtr.Zero,0,0)) > 0)
+                if (message.Code == 0x8001) Console.WriteLine(message.WParam.ToUInt32() == 1 ? "down" : "up");
             if (result == -1) throw new Win32Exception();
         } finally {
             UnhookWindowsHookEx(hook);
@@ -97,18 +111,100 @@ internal static class Program {
         }
     }
 
-    private static void Listen(string mode) {
+    private static RecognizerInfo Recognizer() {
         var installed = SpeechRecognitionEngine.InstalledRecognizers();
         var info = installed.FirstOrDefault(item => item.Culture.Name == CultureInfo.CurrentUICulture.Name)
             ?? installed.FirstOrDefault(item => item.Culture.TwoLetterISOLanguageName == "en")
             ?? installed.FirstOrDefault();
         if (info == null) throw new InvalidOperationException("Install a Windows desktop speech recognition language pack.");
+        return info;
+    }
+
+    private static void OpenMicrophone(SpeechRecognitionEngine engine) {
+        try { engine.SetInputToDefaultAudioDevice(); }
+        catch (Exception error) {
+            throw new InvalidOperationException("Cannot open the default microphone. Check Windows microphone access for desktop apps and the default input device. " + error.Message, error);
+        }
+    }
+
+    private static void WakeService() {
+        var info = Recognizer();
+        using (var engine = new SpeechRecognitionEngine(info)) {
+            var grammar = new GrammarBuilder { Culture = info.Culture };
+            grammar.Append(new Choices("Eli","Ellie"));
+            engine.LoadGrammar(new Grammar(grammar));
+            engine.InitialSilenceTimeout = TimeSpan.FromSeconds(6);
+            engine.EndSilenceTimeout = TimeSpan.FromMilliseconds(350);
+            engine.EndSilenceTimeoutAmbiguous = TimeSpan.FromMilliseconds(500);
+            var gate = new object();
+            int pending = 0;
+            bool cancelled = false;
+            bool speechDetected = false;
+            engine.SpeechDetected += (sender,args) => {
+                lock (gate) {
+                    if (pending != 0 && !cancelled) speechDetected = true;
+                }
+            };
+            engine.RecognizeCompleted += (sender,args) => {
+                lock (gate) {
+                    int id = pending;
+                    pending = 0;
+                    try {
+                        engine.SetInputToNull();
+                        var result = cancelled || args.Cancelled || args.Error != null ? null : args.Result;
+                        Console.WriteLine(Json.Serialize(new {id,kind="done",text=result?.Text,confidence=result?.Confidence,error=args.Error == null ? null : "Windows wake recognition failed."}));
+                    } catch {
+                        Console.WriteLine(Json.Serialize(new {id,kind="done",error="Windows could not release the microphone."}));
+                    }
+                }
+            };
+            Console.WriteLine(Json.Serialize(new {kind="ready"}));
+            string line;
+            while ((line = Console.ReadLine()) != null) {
+                var parts = line.Split(' ');
+                if (parts.Length != 2 || !int.TryParse(parts[1],out var id)) continue;
+                lock (gate) {
+                    if (parts[0] == "start") {
+                        if (pending != 0) {
+                            Console.WriteLine(Json.Serialize(new {id,kind="done"}));
+                            continue;
+                        }
+                        try {
+                            OpenMicrophone(engine);
+                            pending = id;
+                            cancelled = false;
+                            speechDetected = false;
+                            engine.RecognizeAsync(RecognizeMode.Single);
+                            Console.WriteLine(Json.Serialize(new {id,kind="recording"}));
+                        } catch (Exception error) {
+                            pending = 0;
+                            engine.SetInputToNull();
+                            Console.WriteLine(Json.Serialize(new {id,kind="done",error=error.Message}));
+                        }
+                    } else if (id == pending) {
+                        try {
+                            if (parts[0] == "finish" && speechDetected) engine.RecognizeAsyncStop();
+                            else if (parts[0] == "finish" || parts[0] == "cancel") {
+                                cancelled = true;
+                                engine.RecognizeAsyncCancel();
+                            }
+                        } catch (InvalidOperationException) {
+                            // The recognizer can finish before its completion event acquires the lock.
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static void Listen(string mode) {
+        var info = Recognizer();
         using (var engine = new SpeechRecognitionEngine(info)) {
             if (mode == "dictation") {
                 engine.LoadGrammar(new DictationGrammar());
             } else {
                 var grammar = new GrammarBuilder { Culture = info.Culture };
-                grammar.Append(new Choices(mode == "wake" ? new[] {"Eli","Ellie"} : new[] {"Eli stop","Ellie stop"}));
+                grammar.Append(new Choices("Eli stop","Ellie stop"));
                 engine.LoadGrammar(new Grammar(grammar));
             }
             engine.AudioLevelUpdated += (sender, eventArgs) =>
@@ -116,7 +212,7 @@ internal static class Program {
             engine.InitialSilenceTimeout = TimeSpan.FromSeconds(mode == "interrupt" ? 12 : 7);
             engine.EndSilenceTimeout = TimeSpan.FromMilliseconds(600);
             engine.EndSilenceTimeoutAmbiguous = TimeSpan.FromMilliseconds(850);
-            engine.SetInputToDefaultAudioDevice();
+            OpenMicrophone(engine);
             Console.Error.WriteLine("ready");
             var result = engine.Recognize();
             if (result != null) Console.WriteLine(Json.Serialize(new {text=result.Text,confidence=result.Confidence}));

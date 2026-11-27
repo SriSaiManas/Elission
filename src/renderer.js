@@ -10,6 +10,7 @@ const settingsForm = $('settings-form');
 const memoryForm = $('memory-form');
 let prefs, credential, compact = false, player, playerUrl, tab = 'turns', editId;
 let state = {phase:'idle',message:'Standing by',transcript:'',response:''};
+let activation = {}, settingsRequested = false;
 let windows = false, settingsVersion = 0, recordVersion = 0;
 const reminderQueue = [];
 
@@ -43,8 +44,16 @@ function call(method,...args) {
 function setPrefs(value,hasKey) {
   prefs = value;
   credential = hasKey;
-  $('hint').textContent = windows ? 'HOLD ' + prefs.key + ' + SAY “ELI”' : 'TYPE A COMMAND';
-  $('provider').textContent = prefs.provider === 'off' ? 'Local commands' : prefs.provider === 'local' ? 'Local AI' : 'Cloud AI';
+  drawActivation();
+  $('provider').textContent = prefs.provider === 'off' ? 'Local commands' : prefs.modelVerified ? (prefs.provider === 'local' ? 'Local AI' : 'Cloud AI') : 'AI setup required';
+}
+function drawActivation() {
+  if (!prefs) return;
+  $('hint').textContent = windows && prefs.wakeEnabled && activation.wakeReady
+    ? 'HOLD ' + prefs.key + ' + SAY “ELI”'
+    : activation.shortcutReady ? prefs.hotkey.replace('Control','Ctrl').replaceAll('+',' + ') : 'TYPE A COMMAND';
+  $('activation-status').textContent = activation.error || (windows && prefs.wakeEnabled
+    ? (activation.wakeReady ? 'Wake recognition ready.' : 'Preparing Windows wake recognition…') : '');
 }
 function cleanAudio() {
   if (!player) return;
@@ -79,7 +88,15 @@ for (const button of document.querySelectorAll('[data-close]'))
   button.addEventListener('click',() => $(button.dataset.close).close());
 
 if (api) {
-  api['on-state'](next => { state = next; draw(); });
+  api['on-state'](next => {
+    if (next.phase === 'sleep') {
+      settingsPanel.close();
+      recordsPanel.close();
+      settingsForm.elements.secret.value = '';
+    }
+    state = next;
+    draw();
+  });
   api['on-mic-level'](level => visual.mic(level));
   api['on-play'](payload => void play(payload));
   api['on-reminder'](text => {
@@ -90,9 +107,16 @@ if (api) {
     reminderQueue.shift();
     displayReminder();
   });
+  api['on-activation-status'](next => { activation = next; drawActivation(); });
+  api['on-open-settings'](() => {
+    if (prefs) $('settings').click();
+    else settingsRequested = true;
+  });
   api.initial().then(initial => {
+    activation = initial.activation;
     windows = initial.platform === 'win32';
     setPrefs(initial.settings,initial.credential);
+    if (settingsRequested) $('settings').click();
     state = initial.state;
     draw();
   }).catch(showError);
@@ -108,11 +132,12 @@ if (api) {
     void call('submit',text);
   });
   window.addEventListener('keydown',event => {
-    if (event.key === 'Escape' && !settingsPanel.open && !recordsPanel.open) void call('stop');
+    if (event.key === 'Escape' && !settingsPanel.open && !recordsPanel.open) void call('hide');
   });
 
   $('settings').addEventListener('click',async () => {
-    if (!prefs) return;
+    if (!prefs || settingsPanel.open) return;
+    if (recordsPanel.open) recordsPanel.close();
     const generation = ++settingsVersion;
     for (const [key,value] of Object.entries(prefs)) {
       const field = settingsForm.elements.namedItem(key);
@@ -123,7 +148,7 @@ if (api) {
     const voices = settingsForm.elements.voice;
     voices.replaceChildren(new Option('Automatic', ''),...(prefs.voice ? [new Option(prefs.voice,prefs.voice,true,true)] : []));
     settingsForm.elements.secret.value = '';
-    settingsForm.elements.secret.placeholder = credential ? 'Saved in Windows credential storage' : 'Optional for local providers';
+    settingsForm.elements.secret.placeholder = credential ? 'A key is saved for the current endpoint' : 'Required for cloud providers';
     settingsForm.elements.clearSecret.checked = false;
     $('settings-error').textContent = '';
     settingsPanel.showModal();
@@ -135,6 +160,18 @@ if (api) {
       if (generation === settingsVersion && settingsPanel.open) $('settings-error').textContent = error.message;
     }
   });
+  settingsForm.elements.provider.addEventListener('change',() => {
+    const {provider,endpoint,model} = settingsForm.elements;
+    const cloud = 'https://api.openai.com/v1/chat/completions';
+    const local = 'http://127.0.0.1:11434/v1/chat/completions';
+    if (provider.value === 'local' && (!endpoint.value || endpoint.value === cloud)) {
+      endpoint.value = local;
+      model.value = '';
+    } else if (provider.value === 'cloud' && (!endpoint.value || endpoint.value === local)) {
+      endpoint.value = cloud;
+      model.value = 'gpt-4.1-mini';
+    }
+  });
   settingsForm.addEventListener('submit',async event => {
     event.preventDefault();
     const result = {...prefs};
@@ -144,11 +181,17 @@ if (api) {
       result[key] = field.type === 'checkbox' ? field.checked : field.type === 'number' ? Number(field.value) : field.value.trim();
     }
     const secret = settingsForm.elements.clearSecret.checked ? '' : settingsForm.elements.secret.value.trim() || undefined;
+    const button = $('save-settings');
+    if (button.disabled) return;
+    button.disabled = true;
+    $('settings-error').textContent = result.provider === 'off' ? 'Saving…' : 'Checking the model connection…';
+    settingsForm.elements.secret.value = '';
     try {
       const saved = await api.settings(result,secret);
       setPrefs(saved.settings,saved.credential);
       settingsPanel.close();
     } catch (error) { $('settings-error').textContent = error.message; }
+    finally { button.disabled = false; }
   });
 
   $('records').addEventListener('click',() => {

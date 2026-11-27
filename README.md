@@ -6,19 +6,20 @@ A Windows x64 desktop assistant with an interactive crimson particle core, local
 
 1. On Windows 11 x64, extract the entire archive to a local folder. The app requires .NET Framework 4.8 or newer, which is included with current Windows 11 installations. Windows 10 compatibility is unverified.
 2. Open the extracted **ELISSION** folder and launch **ELISSION.exe** there. Keep the sibling runtime files and `resources` directory alongside it. The executable is unsigned.
-3. Try `calculate (12 + 4) * 3` in the prompt. This works without an AI provider.
+3. ELISSION starts in the Windows notification area. Choose **Open ELISSION** from its tray menu to type a command or **Settings** to configure it. Try `calculate (12 + 4) * 3` in the prompt. This works without an AI provider.
 4. To use voice, enable Windows microphone access for desktop apps and install a desktop/SAPI recognition language pack with dictation support. Check **Settings → Voice** for available desktop voices. Some modern Windows narrator voices are unavailable to desktop SAPI.
-5. Hold **I** and say **“Eli”**. Give the recognizer a moment to open the microphone before speaking. After the core activates, speak the request. Release **I** once the gesture completes. **Ctrl + Space** or the microphone button starts dictation directly. Both keys are configurable in Settings. The hold key continues to reach the focused application.
+5. Hold **I** and say **“Eli”**. Give the recognizer a moment to open the microphone before speaking. After the core activates, speak the request. Release **I** once the gesture completes. **Ctrl + Space** opens dictation from the background and hides the visible overlay. The microphone button starts dictation when the overlay is open. Both global activation methods can be changed or disabled in Settings. The hold key continues to reach the focused application.
 6. Stop with **Esc**, **Stop**, or the fallback activation shortcut. For spoken interruption, enable **“Eli, stop” during playback** in Settings. The audio device remains open while this option actively listens. Headphones reduce speaker feedback.
 
-Use the title bar to drag the window, drag an edge to resize, or use the compact and fullscreen controls. Closing the window puts ELISSION to sleep in the tray. Select **Quit ELISSION** from the tray to end the background process.
+Use the title bar to drag the window, drag an edge to resize, or use the compact and fullscreen controls. Escape or the window’s X hides the overlay. Select **Exit** from the tray to shut down ELISSION.
 
 ## AI setup
 
 **Settings → Conversation provider** accepts OpenAI-compatible **Chat Completions** URLs. ELISSION starts in **Local commands only** mode.
 
-- **Cloud** uses an HTTPS endpoint, a model ID, and provider credentials where required. The default URL is `https://api.openai.com/v1/chat/completions`.
-- **Local** requires a separately installed and running OpenAI-compatible loopback server. Set the full URL, for example `http://127.0.0.1:11434/v1/chat/completions` for a compatible Ollama setup, and a model already installed there.
+- **Cloud** uses an HTTPS endpoint, a model ID, and an API key for that endpoint. The default URL is `https://api.openai.com/v1/chat/completions`.
+- **Local** requires a separately installed and running OpenAI-compatible loopback server. Run `ollama list` for the exact model ID. Set the full URL, for example `http://127.0.0.1:11434/v1/chat/completions` for a compatible Ollama setup, and a model already installed there.
+- Saving a new configuration verifies the selected model with a short chat request. Local endpoints must also expose an OpenAI-compatible model list. Existing settings from earlier versions require one verification on save.
 - Model text is streamed into the conversation panel. A local SAPI voice synthesizes the completed response. Pitch and expressiveness support depend on the installed voice.
 - The provider receives prompts entered for AI conversation and any enabled conversation context. Saved preferences are shared only when enabled. File contents require a separate confirmation naming the destination. ELISSION can summarize UTF-8 TXT, MD, CSV, LOG, or JSON files up to 48 KB.
 

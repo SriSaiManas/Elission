@@ -58,18 +58,54 @@ function parse(text) {
     if (match) return { action, value: match[1] };
   }
 }
-async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
+async function providerRequest(endpoint, key, signal, options) {
   const url = new URL(endpoint);
   if (url.username || url.password) throw Error('Use an endpoint without embedded credentials.');
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(url.hostname))) throw Error('Use HTTPS or a loopback HTTP endpoint.');
-  const response = await fetch(url, {
-    method:'POST', redirect:'error', signal,
-    headers:{'Content-Type':'application/json', ...(key && {Authorization:'Bearer ' + key})},
-    body:JSON.stringify({model, messages, stream:true})
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options, redirect:'error', signal,
+      headers:{'Content-Type':'application/json', ...(key && {Authorization:'Bearer ' + key})}
+    });
+  } catch {
+    if (signal?.aborted && signal.reason?.name !== 'TimeoutError') throw signal.reason;
+    if (signal?.aborted) throw Error('The AI request timed out. Check that the server is running and try again.');
+    throw Error('Cannot reach the AI endpoint. Check its URL, network connection, and TLS settings.');
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    if ([401,403].includes(response.status)) throw Error('AI provider returned HTTP ' + response.status + ': credentials were rejected or lack model access.');
+    if (response.status === 404) throw Error('The model or Chat Completions endpoint was not found. Check the model ID and URL.');
+    if (response.status === 429) throw Error('The AI provider is rate-limited or out of quota.');
+    if (response.status >= 500) throw Error('The AI server is unavailable. Check its status and try again.');
+    throw Error('AI provider returned HTTP ' + response.status + '. Check that the model accepts OpenAI-compatible chat requests.');
+  }
+  return response;
+}
+async function verifyModel({provider,endpoint,model,key,signal}) {
+  if (provider === 'local') {
+    const modelsUrl = new URL(endpoint);
+    if (!/\/chat\/completions\/?$/.test(modelsUrl.pathname)) throw Error('Enter the local server’s OpenAI-compatible /chat/completions URL.');
+    modelsUrl.pathname = modelsUrl.pathname.replace(/\/chat\/completions\/?$/,'/models');
+    const response = await providerRequest(modelsUrl,key,signal,{method:'GET'});
+    const list = await response.json().catch(() => null);
+    if (!Array.isArray(list?.data)) throw Error('The local server did not return an OpenAI-compatible model list.');
+    if (!list.data.some(entry => entry?.id === model)) throw Error('Model unavailable on the local server. Start or install it and enter its exact model ID.');
+  }
+  return streamChat({
+    endpoint,model,key,signal,
+    messages:[{role:'user',content:'Reply with the word OK.'}],
+    onPart:() => {}
   });
-  if (!response.ok) throw Error('AI provider returned HTTP ' + response.status + '.');
+}
+async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
+  const response = await providerRequest(endpoint,key,signal,{
+    method:'POST',body:JSON.stringify({model,messages,stream:true})
+  });
   if (!response.headers.get('content-type')?.includes('text/event-stream')) {
-    const content = (await response.json()).choices?.[0]?.message?.content;
+    const payload = await response.json().catch(() => null);
+    const content = payload?.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || !content.trim()) throw Error('The provider returned no response.');
     onPart(content);
     return content;
@@ -90,8 +126,9 @@ async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
           if (!result.trim()) throw Error('The provider returned no response.');
           return result;
         }
-        const event = JSON.parse(payload);
-        if (event.error) throw Error('The AI provider reported an error.');
+        let event;
+        try { event = JSON.parse(payload); } catch { throw Error('The AI endpoint returned invalid streaming data.'); }
+        if (event.error) throw Error('The AI server could not run this model. Check that it is available and supports chat completions.');
         const delta = event.choices?.[0]?.delta?.content;
         if (typeof delta === 'string') {
           result += delta;
@@ -102,8 +139,11 @@ async function streamChat({ endpoint, model, key, messages, signal, onPart }) {
     }
     if (!result.trim()) throw Error('The provider returned no response.');
     return result;
+  } catch (error) {
+    if (signal?.aborted && signal.reason?.name === 'TimeoutError') throw Error('The AI request timed out.');
+    throw error;
   } finally {
     await reader.cancel().catch(() => {});
   }
 }
-module.exports = {isWake, stripWake, calculate, parse, streamChat, personality};
+module.exports = {isWake, stripWake, calculate, parse, streamChat, verifyModel, personality};

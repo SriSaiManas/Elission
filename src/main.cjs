@@ -4,26 +4,28 @@ const fs = require('node:fs/promises');
 const {randomUUID} = require('node:crypto');
 const {store,defaults} = require('./storage.cjs');
 const win = require('./windows.cjs');
-const {isWake,stripWake,calculate,parse,streamChat,personality} = require('./core.cjs');
+const {isWake,stripWake,calculate,parse,streamChat,verifyModel,personality} = require('./core.cjs');
 const icon = path.join(__dirname,'..','assets','elission.png');
 app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
-let view, tray, data, prefs, watcher, reminderTimer, active, wake, held = false, closing = false;
-let audio, interrupt;
+let view, tray, data, prefs, watcher, wakeWorker, providerCheck, reminderTimer, active, wake, held = false, closing = false;
+let audio, interrupt, wakeReady = false, keyReady = false, shortcutReady = false, gestureId = 0;
+let activationError = '';
 let current = {phase:'idle',message:'Standing by',transcript:'',response:''};
-const post = (event,payload) => view?.webContents.send(event,payload);
+const post = (event,payload) => { if (view && !view.isDestroyed()) view.webContents.send(event,payload); };
 function state(phase, changes = {}) {
   current = {...current,phase,...changes};
   post('state',current);
 }
 function show() {
+  if (view.isMinimized()) view.restore();
   view.show();
   view.focus();
 }
 function stop(hide = false) {
   active?.abort();
-  wake?.abort();
+  cancelWake();
   interrupt?.abort();
-  active = wake = undefined;
+  active = undefined;
   post('play',null);
   if (audio) {
     const filename = audio.filename;
@@ -31,6 +33,7 @@ function stop(hide = false) {
     fs.unlink(filename).catch(() => {});
   }
   state(hide ? 'sleep' : 'idle',{message:hide ? '' : 'Standing by',microphone:false});
+  if (hide) providerCheck?.abort();
   if (hide) setTimeout(() => { if (current.phase === 'sleep' && !closing) view.hide(); }, 220);
 }
 function isActive(session) { return active === session && !session.signal.aborted; }
@@ -65,68 +68,129 @@ async function capture(session) {
     if (isActive(session)) report(error);
   }
 }
-async function keyChanged(value) {
+function activationStatus() {
+  const status = {
+    wakeReady:keyReady && wakeReady,
+    shortcutReady,
+    error:activationError
+  };
+  post('activation-status',status);
+  return status;
+}
+function wakeCommand(command,gesture) {
+  if (wakeWorker?.stdin.writable) wakeWorker.stdin.write(command + ' ' + gesture.id + '\n');
+}
+function cancelWake() {
+  if (!wake) return;
+  wakeCommand('cancel',wake);
+  clearTimeout(wake.deadline);
+  wake = undefined;
+}
+function keyChanged(value) {
   if (value === 'up') {
-    if (current.phase === 'speaking' && audio && wake) void listenForStop(audio);
-    if (wake && current.microphone) state(current.phase,{microphone:false});
     held = false;
-    wake?.abort();
-    wake = undefined;
+    if (!wake) return;
+    const gesture = wake;
+    wakeCommand('finish',gesture);
+    clearTimeout(gesture.deadline);
+    gesture.deadline = setTimeout(() => {
+      if (wake !== gesture) return;
+      cancelWake();
+      state(current.phase,{microphone:false});
+      if (audio) void listenForStop(audio);
+    },900);
     return;
   }
   if (value !== 'down' || held) return;
   held = true;
-  if (['listening','activating'].includes(current.phase)) return;
-  interrupt?.abort();
-  if (current.microphone) state(current.phase,{microphone:false});
-  const gesture = wake = new AbortController();
-  const delay = setTimeout(() => { if (wake === gesture && view.isVisible() && current.phase === 'idle') state('idle',{message:'Checking for “Eli”'}); },600);
-  try {
-    const output = await win.run('wake',[],undefined,gesture.signal,16000,event => {
-      if (event.ready && wake === gesture) state(current.phase,{microphone:true});
-    });
-    const result = output ? JSON.parse(output) : null;
-    if (wake === gesture && held && result?.confidence >= 0.55 && isWake(result.text)) activate();
-  } catch (error) {
-    if (wake === gesture && !gesture.signal.aborted) {
-      show();
-      report(error);
-    }
-  } finally {
-    clearTimeout(delay);
-    if (wake === gesture) {
-      wake = undefined;
-      state(current.phase,{microphone:false,...(current.message === 'Checking for “Eli”' && {message:'Standing by'})});
-      if (current.phase === 'speaking' && audio) void listenForStop(audio);
-    }
+  if (!wakeReady && activationError) {
+    show();
+    report(Error(activationError));
+    return;
   }
+  if (!wakeReady || wake || ['listening','activating'].includes(current.phase)) return;
+  interrupt?.abort();
+  const gesture = wake = {id:++gestureId};
+  wakeCommand('start',gesture);
+  gesture.deadline = setTimeout(() => {
+    if (wake !== gesture) return;
+    cancelWake();
+    state(current.phase,{microphone:false});
+    if (audio) void listenForStop(audio);
+  },8500);
 }
-function register() {
-  globalShortcut.unregisterAll();
-  const registered = globalShortcut.register(prefs.hotkey,() => {
-    if (current.phase !== 'activating' && current.phase !== 'listening') activate(true);
-  });
-  if (!registered) state('error',{message:'The fallback shortcut is already in use.'});
-  held = false;
-  wake?.abort();
-  watcher?.kill();
-  watcher = undefined;
-  if (process.platform !== 'win32') return;
-  const child = watcher = win.worker('keys',[String(prefs.key.charCodeAt(0))]);
+function wakeEvent(event) {
+  if (event.kind === 'ready') {
+    wakeReady = true;
+    activationStatus();
+    return;
+  }
+  if (wake?.id !== event.id) return;
+  if (event.kind === 'recording') {
+    state(current.phase,{microphone:true});
+    return;
+  }
+  if (event.kind !== 'done') return;
+  clearTimeout(wake.deadline);
+  wake = undefined;
+  state(current.phase,{microphone:false});
+  if (event.error) {
+    show();
+    return report(Error(event.error));
+  }
+  if (event.confidence >= 0.55 && typeof event.text === 'string' && isWake(event.text)) {
+    if (view.isVisible() && !view.isMinimized()) stop(true);
+    else activate();
+  } else if (audio) void listenForStop(audio);
+}
+function startActivationWorker(mode,args,onLine,isCurrent) {
+  const child = win.worker(mode,args);
+  let buffer = '', errors = '';
   child.stdin.on('error',() => {});
-  child.stdin.end();
-  let buffer = '', error = '';
   child.stdout.setEncoding('utf8').on('data',chunk => {
     buffer += chunk;
     const lines = buffer.split('\n');
     buffer = lines.pop();
-    if (watcher === child) for (const line of lines) void keyChanged(line.trim());
+    if (isCurrent(child)) for (const line of lines) onLine(line.trim());
   });
-  child.stderr.setEncoding('utf8').on('data',chunk => { error += chunk; });
-  child.on('error',error => { if (watcher === child) report(error); });
-  child.on('exit',code => {
-    if (!closing && watcher === child && code !== 0) state('error',{message:error.trim() || 'The Windows keyboard worker stopped.'});
+  child.stderr.setEncoding('utf8').on('data',chunk => { errors = (errors + chunk).slice(-2000); });
+  function failed(message) {
+    if (closing || !isCurrent(child)) return;
+    if (mode === 'keys') keyReady = false;
+    else wakeReady = false;
+    cancelWake();
+    state(current.phase,{microphone:false});
+    activationError = message || 'The Windows ' + mode + ' worker stopped.';
+    activationStatus();
+  }
+  child.on('error',() => failed('Could not start the Windows ' + mode + ' worker.'));
+  child.on('close',() => failed(errors.trim()));
+  return child;
+}
+function register() {
+  globalShortcut.unregisterAll();
+  shortcutReady = !!prefs.hotkey && globalShortcut.register(prefs.hotkey,() => {
+    if (view.isVisible() && !view.isMinimized()) stop(true);
+    else activate(true);
   });
+  activationError = prefs.hotkey && !shortcutReady ? 'The fallback shortcut is already in use.' : '';
+  held = keyReady = wakeReady = false;
+  cancelWake();
+  watcher?.stdin.end();
+  wakeWorker?.stdin.end();
+  watcher = wakeWorker = undefined;
+  if (process.platform === 'win32' && prefs.wakeEnabled) {
+    watcher = startActivationWorker('keys',[String(prefs.key.charCodeAt(0))],line => {
+      if (line === 'ready') {
+        keyReady = true;
+        activationStatus();
+      } else keyChanged(line);
+    },child => watcher === child);
+    wakeWorker = startActivationWorker('wake-service',[],line => {
+      try { wakeEvent(JSON.parse(line)); } catch { /* Ignore malformed helper output. */ }
+    },child => wakeWorker === child);
+  }
+  activationStatus();
 }
 async function confirm(message, signal) {
   const choice = await dialog.showMessageBox(view,{type:'warning',title:'ELISSION · Confirmation',message,buttons:['Cancel','Continue'],defaultId:0,cancelId:0,signal});
@@ -137,8 +201,12 @@ async function filePicker(properties) {
   if (result.canceled || !result.filePaths[0]) throw Error('Cancelled.');
   return result.filePaths[0];
 }
+function requireModel() {
+  if (prefs.provider === 'off') throw Error('Open Settings to select and verify a cloud or local AI model.');
+  if (!prefs.modelVerified) throw Error('Open Settings and save your AI configuration to verify the connection.');
+}
 async function chat(text,session,document = false) {
-  if (prefs.provider === 'off') throw Error('Configure a cloud or local AI model in Settings to continue.');
+  requireModel();
   const memory = document || !prefs.sharePreferences ? [] : data.memories().filter(row => row.type === 'preference').slice(0,12);
   const history = document || !prefs.history ? [] : data.turns().slice(-8);
   state('thinking',{message:'Analysing',response:''});
@@ -235,7 +303,7 @@ async function execute({action,value},session) {
       return 'Screenshot saved.';
     }
     case 'summarize': {
-      if (prefs.provider === 'off') throw Error('Configure an AI provider in Settings first.');
+      requireModel();
       const filename = await filePicker(['openFile']);
       if (!/\.(txt|md|csv|log|json)$/i.test(filename)) throw Error('Summarization supports TXT, MD, CSV, LOG and JSON files.');
       const endpoint = new URL(prefs.endpoint);
@@ -337,15 +405,18 @@ function normalize(input) {
   if (!['off','cloud','local'].includes(settings.provider)) throw Error('Select an AI provider.');
   if (!/^[A-Z0-9]$/.test(settings.key.toUpperCase())) throw Error('Use a single letter or digit for the activation key.');
   settings.key = settings.key.toUpperCase();
-  if (!['Control+Space','Control+Shift+Space','Alt+Space'].includes(settings.hotkey)) throw Error('Select a supported fallback shortcut.');
+  if (!['','Control+Space','Control+Shift+Space','Alt+Space'].includes(settings.hotkey)) throw Error('Select a supported fallback shortcut.');
   if (!['low','medium','high'].includes(settings.style) || !['concise','balanced','detailed'].includes(settings.verbosity)) throw Error('Choose a supported voice and response style.');
   if (!['center','right'].includes(settings.position)) throw Error('Choose a supported window position.');
   for (const name of ['pitch','rate']) if (!Number.isInteger(settings[name]) || Math.abs(settings[name]) > 40) throw Error('Use a rate and pitch between −40 and +40.');
   if (settings.provider !== 'off') {
-    const url = new URL(settings.endpoint);
+    let url;
+    try { url = new URL(settings.endpoint); } catch { throw Error('Enter a valid Chat Completions URL.'); }
     const local = ['localhost','127.0.0.1','[::1]'].includes(url.hostname);
-    if (url.username || url.password || (settings.provider === 'local' && !local) || (url.protocol !== 'https:' && !(url.protocol === 'http:' && local))) throw Error('Use an HTTPS cloud endpoint or a loopback local endpoint.');
-    if (!settings.model.trim()) throw Error('Enter a model name.');
+    if (url.username || url.password || url.search || url.hash || (settings.provider === 'local' && !local) || (url.protocol !== 'https:' && !(url.protocol === 'http:' && local))) throw Error('Use an HTTPS cloud endpoint or a loopback local endpoint.');
+    settings.endpoint = url.href;
+    settings.model = settings.model.trim();
+    if (!settings.model) throw Error('Enter a model name.');
   }
   return settings;
 }
@@ -363,7 +434,7 @@ function handle(name,fn) {
   });
 }
 function wiring() {
-  handle('initial',() => ({state:current,settings:prefs,credential:data.hasCredential(),platform:process.platform}));
+  handle('initial',() => ({state:current,settings:prefs,credential:data.hasCredential(),platform:process.platform,activation:activationStatus()}));
   handle('submit',text => typeof text === 'string' && submit(text));
   handle('listen',() => activate(true));
   handle('stop',() => stop());
@@ -393,20 +464,33 @@ function wiring() {
     const output = await win.run('voices',[]);
     return output ? [JSON.parse(output)].flat() : [];
   });
-  handle('settings',(input,secret) => {
+  handle('settings',async (input,secret) => {
+    if (providerCheck) throw Error('A connection check is already running.');
     const next = normalize(input);
-    const rebind = next.key !== prefs.key || next.hotkey !== prefs.hotkey;
+    const rebind = next.key !== prefs.key || next.hotkey !== prefs.hotkey || next.wakeEnabled !== prefs.wakeEnabled
+      || (next.wakeEnabled && process.platform === 'win32' && !wakeReady && !!activationError);
     const relocate = next.position !== prefs.position;
-    const newOrigin = next.provider === 'off' ? null : new URL(next.endpoint).origin;
-    const oldOrigin = prefs.provider === 'off' ? null : new URL(prefs.endpoint).origin;
-    if (typeof secret !== 'string' && newOrigin && oldOrigin !== newOrigin && data.hasCredential()) {
-      throw Error('Enter a key for the new provider or select Remove saved API key.');
-    }
-    if (typeof secret === 'string') {
-      if (secret.length > 4096) throw Error('Credential is too long.');
-      data.writeCredential(secret);
-    }
-    data.writeSettings(next);
+    if (typeof secret === 'string' && (secret.length > 4096 || /[\r\n]/.test(secret))) throw Error('Enter a valid API key.');
+    const sameEndpoint = prefs.provider === next.provider && prefs.endpoint === next.endpoint;
+    next.modelVerified = false;
+    if (next.provider !== 'off') {
+      const key = typeof secret === 'string' ? secret : sameEndpoint ? data.credential() : '';
+      if (next.provider === 'cloud' && !key) throw Error('Enter an API key for this cloud endpoint.');
+      const unchanged = sameEndpoint && prefs.model === next.model && typeof secret !== 'string' && prefs.modelVerified;
+      if (!unchanged) {
+        const check = providerCheck = new AbortController();
+        try {
+          await verifyModel({
+            provider:next.provider,endpoint:next.endpoint,model:next.model,key,
+            signal:AbortSignal.any([check.signal,AbortSignal.timeout(60000)])
+          });
+        } finally { providerCheck = undefined; }
+      }
+      next.modelVerified = true;
+      if (!sameEndpoint && typeof secret !== 'string') secret = '';
+    } else secret = '';
+    if (closing) throw Error('ELISSION is exiting.');
+    data.saveConfiguration(next,secret);
     prefs = next;
     view.setAlwaysOnTop(prefs.top);
     if (relocate) position();
@@ -440,7 +524,6 @@ function wiring() {
 app.setAppUserModelId('org.elission.desktop');
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance',() => { if (view) activate(false); });
   app.whenReady().then(async () => {
     data = store(app.getPath('userData'));
     prefs = data.settings();
@@ -454,25 +537,21 @@ else {
     view.webContents.on('will-navigate',event => event.preventDefault());
     view.webContents.session.setPermissionRequestHandler((_contents,_permission,answer) => answer(false));
     view.on('close',event => { if (!closing) { event.preventDefault(); stop(true); } });
+    wiring();
+    position();
+    await view.loadFile(path.join(__dirname,'..','dist','index.html'));
     tray = new Tray(nativeImage.createFromPath(icon));
     tray.setToolTip('ELISSION');
     tray.setContextMenu(Menu.buildFromTemplate([
       {label:'Open ELISSION',click:() => activate(false)},{label:'Listen',click:() => activate(true)},
-      {label:'Sleep',click:() => stop(true)},{type:'separator'},{label:'Quit ELISSION',click:() => app.quit()}
+      {label:'Settings',click:() => { activate(false); post('open-settings'); }},
+      {type:'separator'},{label:'Exit',click:() => app.quit()}
     ]));
     tray.on('click',() => activate(false));
-    wiring();
-    position();
-    await view.loadFile(path.join(__dirname,'..','dist','index.html'));
-    show();
     register();
     reminderTimer = setInterval(() => {
       const due = data.dueReminders();
       for (const entry of due) {
-        if (!view.isVisible() || view.isMinimized()) {
-          if (current.phase === 'sleep') state('idle',{message:'Standing by'});
-          view.showInactive();
-        }
         post('reminder',entry.text);
         if (Notification.isSupported()) {
           const notification = new Notification({title:'ELISSION · Reminder',body:entry.text,icon});
@@ -484,13 +563,18 @@ else {
     },1000);
   }).catch(error => { dialog.showErrorBox('ELISSION could not start',error.message); app.quit(); });
 }
-app.on('before-quit',() => {
+app.on('before-quit',event => {
+  if (closing) return;
+  event.preventDefault();
   closing = true;
   active?.abort();
-  wake?.abort();
-  watcher?.kill();
+  providerCheck?.abort();
+  cancelWake();
   interrupt?.abort();
   globalShortcut.unregisterAll();
   clearInterval(reminderTimer);
-  if (audio) fs.unlink(audio.filename).catch(() => {});
+  tray?.destroy();
+  const cleanup = [win.shutdown([watcher,wakeWorker])];
+  if (audio) cleanup.push(fs.unlink(audio.filename).catch(() => {}));
+  Promise.allSettled(cleanup).then(() => app.quit());
 });

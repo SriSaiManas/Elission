@@ -70,7 +70,7 @@ test('nonstreaming server fallback and cancellation work', async t => {
   const parts = [];
   assert.equal(await streamChat({...request,endpoint,onPart:value => parts.push(value)}),'result');
   assert.deepEqual(parts,['result']);
-  await assert.rejects(streamChat({...request,endpoint:endpoint + '/pending',signal:AbortSignal.timeout(35),onPart:() => {}}),{name:'TimeoutError'});
+  await assert.rejects(streamChat({...request,endpoint:endpoint + '/pending',signal:AbortSignal.timeout(35),onPart:() => {}}),/timed out/);
 });
 
 test('transport rejects unsafe endpoints, redirects, and provider errors', async t => {
@@ -87,5 +87,5 @@ test('transport rejects unsafe endpoints, redirects, and provider errors', async
   await assert.rejects(streamChat({...options,endpoint:'http://example.com'}),/HTTPS/);
   await assert.rejects(streamChat({...options,endpoint:'https://abc:xyz@example.com'}),/embedded credentials/);
   await assert.rejects(streamChat({...options,endpoint:endpoint + '/redirect'}));
-  await assert.rejects(streamChat({...options,endpoint}),/403/);
+  await assert.rejects(streamChat({...options,endpoint}),/403.*credentials/);
 });

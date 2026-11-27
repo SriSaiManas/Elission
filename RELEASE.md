@@ -19,3 +19,13 @@ makensis /WX "/DPAYLOAD_DIR=$PWD\release\payload\ELISSION" "/DSETUP_OUTPUT=$PWD\
 ```
 
 The result installs the same application. The installer binary can differ due to build timestamps, tool versions, or the build environment.
+
+## Windows acceptance checks before packaging
+
+Install Node.js and the .NET SDK. Run `npm ci`, `npm test`, and `npm run build:win-helper` from the source root, then use `npm start` on Windows x64 for the runtime check.
+
+- Confirm that startup creates a notification-area icon with the overlay hidden. Repeat launch and confirm that there is still one Electron main process.
+- From the tray open Settings. With a working local endpoint or cloud account, save an invalid configuration and verify that it is rejected. Save a valid one, submit a message, and confirm the model’s actual response. Local servers should list the selected ID from their OpenAI-compatible models endpoint.
+- Focus Notepad. Hold I, say “Eli”, and release. Repeat with the assistant hidden again, including a quick release immediately after speaking. Confirm the foreground app receives the I key and that a hold with no speech does not open the overlay. Change and disable the shortcut in Settings. Confirm that missing microphone access produces a useful error.
+- Toggle the overlay with Ctrl+Space, hide it with Escape and X, and reopen it from the tray. Choose Exit and confirm in Task Manager that the Electron app and its `Elission.Windows.exe` helpers have terminated. Repeat startup and shutdown.
+- After those checks pass, run the packaging commands above.

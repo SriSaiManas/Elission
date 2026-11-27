@@ -12,6 +12,10 @@ const fs = require('node:fs/promises');
   const profile = await fs.mkdtemp(path.join(os.tmpdir(),'eli-smoke-'));
   const calls = [];
   const provider = http.createServer(async (req,res) => {
+    if (req.url === '/v1/models') {
+      res.writeHead(200,{'Content-Type':'application/json'});
+      return res.end(JSON.stringify({data:[{id:'test-model'}]}));
+    }
     let body = '';
     for await (const chunk of req) body += chunk;
     calls.push(JSON.parse(body));
@@ -31,6 +35,9 @@ const fs = require('node:fs/promises');
     page.setDefaultTimeout(10000);
     page.on('pageerror',error => errors.push(String(error)));
     page.on('console',message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.waitForLoadState('domcontentloaded');
+    assert.equal(await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].isVisible()),false);
+    await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].show());
     await page.getByText('Standing by',{exact:true}).waitFor();
     return page;
   }
@@ -61,6 +68,10 @@ const fs = require('node:fs/promises');
     await page.getByRole('button',{name:'Settings',exact:true}).click();
     await page.locator('[name=provider]').selectOption('local');
     await page.getByLabel('Chat completions URL').fill('http://127.0.0.1:' + provider.address().port + '/v1/chat/completions');
+    await page.getByLabel('Model',{exact:true}).fill('missing-model');
+    await page.getByRole('button',{name:'Save settings'}).click();
+    await page.getByText(/Model unavailable on the local server/).waitFor();
+    assert.equal(calls.length,0);
     await page.getByLabel('Model',{exact:true}).fill('test-model');
     await page.getByLabel('Speak responses').uncheck();
     await page.getByRole('button',{name:'Save settings'}).click();
@@ -69,9 +80,9 @@ const fs = require('node:fs/promises');
     await enter('say hello');
     await page.getByText('First chunk',{exact:true}).waitFor();
     await page.getByText('First chunk and final answer.',{exact:true}).waitFor();
-    assert.equal(calls[0].model,'test-model');
-    assert.ok(calls[0].messages.some(message => message.content === '48'));
-    assert.ok(!calls[0].messages.some(message => message.content.includes('metric preferred')));
+    assert.equal(calls[1].model,'test-model');
+    assert.ok(calls[1].messages.some(message => message.content === '48'));
+    assert.ok(!calls[1].messages.some(message => message.content.includes('metric preferred')));
     await enter('cancel prompt');
     await page.getByRole('button',{name:'Stop',exact:false}).click();
     await page.getByText('Standing by',{exact:true}).waitFor();
@@ -91,6 +102,11 @@ const fs = require('node:fs/promises');
     await page.waitForFunction(() => innerWidth === screen.width);
     await page.getByRole('button',{name:'Toggle full screen'}).click();
     await page.waitForFunction(() => innerWidth < screen.width);
+    await page.keyboard.press('Escape');
+    await page.locator('#phase').getByText('sleep',{exact:true}).waitFor({state:'attached'});
+    await new Promise(resolve => setTimeout(resolve,350));
+    assert.equal(await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].isVisible()),false);
+    await app.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].show());
     await page.getByRole('button',{name:'Sleep and hide'}).click();
     const visible = await app.evaluate(async ({BrowserWindow}) => {
       await new Promise(resolve => setTimeout(resolve,350));
@@ -105,6 +121,21 @@ const fs = require('node:fs/promises');
     await page.getByText('First chunk and final answer.',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Memory',exact:true}).click();
     await page.getByText('metric preferred',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Close activity'}).click();
+    if (process.env.ELISSION_LIVE_MODEL_URL && process.env.ELISSION_LIVE_MODEL) {
+      await page.getByRole('button',{name:'Settings',exact:true}).click();
+      await page.getByLabel('Chat completions URL').fill(process.env.ELISSION_LIVE_MODEL_URL);
+      await page.getByLabel('Model',{exact:true}).fill(process.env.ELISSION_LIVE_MODEL);
+      await page.getByLabel('Save conversations locally and include recent turns in AI context').uncheck();
+      await page.getByRole('button',{name:'Save settings'}).click();
+      await page.locator('#settings-panel').waitFor({state:'hidden',timeout:65000});
+      const prompt = 'What is the capital of France? Answer in one word.';
+      await enter(prompt);
+      await page.locator('#heard').getByText(prompt,{exact:true}).waitFor();
+      await page.waitForFunction(() => document.querySelector('#phase').textContent === 'idle'
+        && document.querySelector('#answer').textContent.trim().length > 0,null,{timeout:30000});
+      console.log('PASS real model connection verification and chat response:', (await page.locator('#answer').innerText()).slice(0,160));
+    }
     assert.deepEqual(errors,[]);
     console.log('PASS compact, fullscreen, sleep, persisted settings/history/memory, no renderer errors');
   } finally {

@@ -1,7 +1,7 @@
 const {DatabaseSync} = require('node:sqlite');
 const {safeStorage} = require('electron');
 const path = require('node:path');
-const defaults = {provider:'off',endpoint:'https://api.openai.com/v1/chat/completions',model:'gpt-4.1-mini',key:'I',hotkey:'Control+Space',voice:'',rate:-10,pitch:-12,style:'low',verbosity:'concise',speak:true,continuous:true,spokenInterrupt:false,sharePreferences:false,history:true,top:true,position:'center'};
+const defaults = {provider:'off',modelVerified:false,endpoint:'https://api.openai.com/v1/chat/completions',model:'gpt-4.1-mini',key:'I',wakeEnabled:true,hotkey:'Control+Space',voice:'',rate:-10,pitch:-12,style:'low',verbosity:'concise',speak:true,continuous:true,spokenInterrupt:false,sharePreferences:false,history:true,top:true,position:'center'};
 function store(directory) {
   const db = new DatabaseSync(path.join(directory,'elission.sqlite'));
   db.exec(`PRAGMA journal_mode=WAL;
@@ -26,16 +26,29 @@ function store(directory) {
   return {
     db,
     settings:() => ({...defaults,...JSON.parse(read('settings') || '{}')}),
-    writeSettings:settings => put.run('settings',JSON.stringify(settings)),
+    saveConfiguration(settings, credential) {
+      let encrypted;
+      if (credential) {
+        if (!safeStorage.isEncryptionAvailable() || (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text')) {
+          throw Error('OS-backed credential storage is unavailable.');
+        }
+        encrypted = safeStorage.encryptString(credential).toString('base64');
+      }
+      db.exec('BEGIN');
+      try {
+        put.run('settings',JSON.stringify(settings));
+        if (encrypted) put.run('credential',encrypted);
+        else if (credential === '') db.prepare("DELETE FROM config WHERE key='credential'").run();
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
     hasCredential:() => !!read('credential'),
     credential:() => {
       const encrypted = read('credential');
       return encrypted ? safeStorage.decryptString(Buffer.from(encrypted,'base64')) : '';
-    },
-    writeCredential:value => {
-      if (!value) return db.prepare("DELETE FROM config WHERE key='credential'").run();
-      if (!safeStorage.isEncryptionAvailable()) throw Error('OS-backed credential storage is unavailable.');
-      put.run('credential',safeStorage.encryptString(value).toString('base64'));
     },
     turns:() => db.prepare('SELECT user,assistant FROM turns ORDER BY id DESC LIMIT 16').all().reverse().map(row => ({user:reveal(row.user),assistant:reveal(row.assistant)})),
     addTurn:(user, reply) => db.prepare('INSERT INTO turns(user,assistant) VALUES (?,?)').run(protect(user),protect(reply)),

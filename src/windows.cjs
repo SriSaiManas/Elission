@@ -3,13 +3,28 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const {existsSync} = require('node:fs');
 const scripts = path.join(__dirname,'..','windows');
+const workers = new Set();
 function worker(mode, args = [], signal) {
   if (process.platform !== 'win32') throw Error('This operation requires Windows.');
   const packaged = path.join(scripts,'Elission.Windows.exe');
   const executable = existsSync(packaged) ? packaged : path.join(scripts,'bin','Release','net48','Elission.Windows.exe');
-  return spawn(executable, [mode,...args], {
+  const child = spawn(executable, [mode,...args], {
     cwd:scripts, windowsHide:true, signal, stdio:['pipe','pipe','pipe']
   });
+  workers.add(child);
+  child.once('close',() => workers.delete(child));
+  return child;
+}
+async function shutdown(graceful) {
+  await Promise.all([...workers].map(child => new Promise(resolve => {
+    const timeout = setTimeout(() => {
+      child.kill();
+      resolve();
+    },1200);
+    child.once('close',() => { clearTimeout(timeout); resolve(); });
+    if (graceful.includes(child)) child.stdin.end();
+    else child.kill();
+  })));
 }
 function run(script, args, request, signal, timeout = 25000, onAudio) {
   return new Promise((resolve,reject) => {
@@ -50,4 +65,4 @@ async function shortcuts() {
   }
   return [...entries.values()].sort((a,b) => a.name.localeCompare(b.name));
 }
-module.exports = {worker,run,shortcuts};
+module.exports = {worker,run,shortcuts,shutdown};

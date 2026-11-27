@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>ELISSION</title>
+</head>
+<body>
+<main class="shell">
+  <header class="titlebar">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><h1>ELISSION</h1></div>
+    <nav aria-label="Window controls">
+      <button id="compact" type="button" title="Toggle compact mode" aria-label="Toggle compact mode">◫</button>
+      <button id="fullscreen" type="button" title="Toggle full screen" aria-label="Toggle full screen">⛶</button>
+      <button id="minimize" type="button" title="Minimize" aria-label="Minimize">−</button>
+      <button id="hide" type="button" title="Sleep and hide" aria-label="Sleep and hide">×</button>
+    </nav>
+  </header>
+  <div class="viewport" id="viewport">
+    <div class="core-surface" id="core" aria-hidden="true"></div>
+    <div class="view-head">
+      <span class="core-title">Intelligence core</span>
+      <span class="phase"><i></i><span id="phase">Idle</span></span>
+    </div>
+    <div class="view-foot">
+      <span id="hint">HOLD I + SAY “ELI”</span>
+      <canvas id="wave" aria-hidden="true"></canvas>
+      <span id="privacy-indicator">MIC OFF</span>
+    </div>
+    <div class="cross cross-left" aria-hidden="true"></div>
+    <div class="cross cross-right" aria-hidden="true"></div>
+  </div>
+  <section class="dialogue" aria-label="Conversation">
+    <div class="reminder-banner" id="reminder-banner" hidden>
+      <span>Reminder</span><p id="reminder-text" role="status"></p><button type="button" id="dismiss-reminder" aria-label="Dismiss reminder">×</button>
+    </div>
+    <div class="dialogue-heading">
+      <p id="message" role="status">Standing by</p>
+      <button id="stop" type="button" hidden>Stop <kbd>Esc</kbd></button>
+    </div>
+    <div class="transcript" id="transcript" tabindex="0" hidden>
+      <p class="user-line" id="heard"></p>
+      <p class="response-line" id="answer"></p>
+    </div>
+    <form id="prompt">
+      <button class="mic" id="listen" type="button" title="Start voice session" aria-label="Start voice session"><span></span></button>
+      <input id="input" aria-label="Message or command" placeholder="Type a message or command…" maxlength="6000" autocomplete="off">
+      <button class="send" type="submit" title="Send" aria-label="Send"><span></span></button>
+    </form>
+  </section>
+  <footer class="footer">
+    <span class="provider" id="provider">Local commands</span>
+    <div>
+      <button id="records" type="button">Activity</button>
+      <button id="settings" type="button">Settings</button>
+    </div>
+  </footer>
+</main>
+<dialog id="settings-panel">
+  <div class="panel-header"><h2>Settings</h2><button data-close="settings-panel" title="Close settings" aria-label="Close settings">×</button></div>
+  <form id="settings-form">
+    <fieldset><legend>Activation &amp; window</legend>
+      <label>Hold key<input name="key" maxlength="1" required></label>
+      <label>Fallback shortcut<select name="hotkey"><option value="Control+Space">Ctrl + Space</option><option value="Control+Shift+Space">Ctrl + Shift + Space</option><option value="Alt+Space">Alt + Space</option></select></label>
+      <label>Window position<select name="position"><option value="center">Centre</option><option value="right">Right</option></select></label>
+      <label class="check"><input name="top" type="checkbox">Always on top</label>
+    </fieldset>
+    <fieldset><legend>Conversation provider</legend>
+      <label>Provider<select name="provider"><option value="off">Local commands only</option><option value="cloud">Cloud · OpenAI compatible</option><option value="local">Local · OpenAI compatible</option></select></label>
+      <label>Model<input name="model" maxlength="200"></label>
+      <label class="span">Chat completions URL<input name="endpoint" type="url" maxlength="2048"></label>
+      <label class="span">API key<input name="secret" type="password" maxlength="4096" autocomplete="new-password"></label>
+      <label class="check span"><input name="clearSecret" type="checkbox">Remove saved API key</label>
+      <label class="check span"><input name="history" type="checkbox">Save conversations locally and include recent turns in AI context</label>
+      <label class="check span"><input name="sharePreferences" type="checkbox">Include saved preferences in AI context</label>
+      <p class="span setting-note">The configured provider receives your chat prompts. Selected documents require separate confirmation.</p>
+    </fieldset>
+    <fieldset><legend>Voice</legend>
+      <label class="span">Windows voice<select name="voice"><option value="">Automatic</option></select></label>
+      <label>Pitch adjustment (%)<input name="pitch" type="number" min="-40" max="40" required></label>
+      <label>Speed adjustment (%)<input name="rate" type="number" min="-40" max="40" required></label>
+      <label>Expressiveness<select name="style"><option>low</option><option>medium</option><option>high</option></select></label>
+      <label>Response length<select name="verbosity"><option>concise</option><option>balanced</option><option>detailed</option></select></label>
+      <label class="check"><input name="speak" type="checkbox">Speak responses</label>
+      <label class="check"><input name="continuous" type="checkbox">Listen for spoken follow-ups</label>
+      <label class="check span"><input name="spokenInterrupt" type="checkbox">Enable “Eli, stop” during playback</label>
+    </fieldset>
+    <p class="form-error" id="settings-error" role="status"></p>
+    <button class="primary" type="submit">Save settings</button>
+  </form>
+</dialog>
+<dialog id="records-panel">
+  <div class="panel-header"><h2>Activity</h2><button data-close="records-panel" title="Close activity" aria-label="Close activity">×</button></div>
+  <div class="tabbar" aria-label="Activity sections">
+    <button data-tab="turns">History</button><button data-tab="memory">Memory</button><button data-tab="log">Operations</button><button data-tab="reminders">Reminders</button>
+  </div>
+  <form id="memory-form" hidden>
+    <label>Type<select name="type"><option>preference</option><option>note</option><option>command</option><option>app</option></select></label>
+    <label>Text<textarea name="text" required maxlength="2000"></textarea></label>
+    <button class="primary" type="submit">Save memory</button>
+  </form>
+  <p id="records-error" class="form-error" role="status"></p>
+  <div id="records-content"></div>
+</dialog>
+<script type="module" src="/src/renderer.js"></script>
+</body>
+</html>

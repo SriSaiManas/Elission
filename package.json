@@ -1,0 +1,26 @@
+{
+  "name": "elission",
+  "version": "1.0.0",
+  "description": "ELISSION Windows desktop companion",
+  "main": "src/main.cjs",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "start": "npm run build && electron .",
+    "test": "node --test",
+    "pack:win": "npm run build && npm run build:win-helper && node scripts/pack.cjs",
+    "build:win-helper": "dotnet build windows -c Release",
+    "test:desktop": "npm run build && node scripts/smoke-linux.cjs"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@electron/get": "5.0.0",
+    "electron": "45.5.0",
+    "playwright-core": "1.65.1",
+    "vite": "7.3.8",
+    "yauzl": "3.4.0",
+    "yazl": "3.3.1"
+  }
+}
